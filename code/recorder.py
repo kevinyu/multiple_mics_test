@@ -2,6 +2,7 @@
 PyAudio Example: Make a wire between input and output (i.e., record a
 few samples and play them back immediately).
 """
+from __future__ import print_function
 import os
 import sys
 import time
@@ -15,12 +16,12 @@ import scipy.io.wavfile
 
 CHUNK = 1024 * 4
 WIDTH = 2
-CHANNELS = 1
+GUI_WIDTH = 640
+GUI_HEIGHT = 480
+
 RATE = 30000
 SILENT_BUFFER = 1.0
 CROSSINGS_THRESHOLD = 0.2 * 200 # (heuristic: 200 crossings per second during sound)
-GUI_WIDTH = 640
-GUI_HEIGHT = 480
 WHITE = (255,255,255) #RGB
 BLACK = (0,0,0) #RGB
 
@@ -121,18 +122,68 @@ class SoundDetector(AppService):
             self.emit(MessageType.RECORDING, value=False)
 
     def above_threshold(self, buffer):
-        detection_window = buffer[-self.detection_window:, 0]
-        threshold_crossings = np.nonzero(
-            np.diff(detection_window > self.amp_threshold)
-        )[0]
+        detection_window = buffer[-self.detection_window:]
+
+        ratios = {}
+        did_exceed_threshold = False
+        for ch_idx in range(self.app.channels):
+            threshold_crossings = np.nonzero(
+                np.diff(detection_window[:, ch_idx] > self.amp_threshold)
+            )[0]
+            ratios[ch_idx] = int(threshold_crossings.size) / CROSSINGS_THRESHOLD
+            if ratios[ch_idx] > CROSSINGS_THRESHOLD:
+                did_exceed_threshold = True
 
         self.emit(
             MessageType.ABOVE_THRESHOLD,
-            ratio=int(threshold_crossings.size) / CROSSINGS_THRESHOLD
+            ratios=ratios
         )
 
-        return int(threshold_crossings.size) > CROSSINGS_THRESHOLD
+        return did_exceed_threshold
 
+
+class MicPanel(object):
+    def __init__(self, x, y, width=100, height=100):
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.min_radius = 20
+        self.max_radius = 40
+        self.scale = 100.0
+        self.surface = pg.Surface((self.width, self.height))
+
+    def draw(self, surface):
+        return surface.blit(self.surface, (self.x, self.y))
+
+    def set_data(self, data, offset):
+        self.surface.fill(WHITE)
+        x = np.linspace(self.max_radius * 2, self.width, len(data))
+        y = self.height // 2 - (data / self.scale)
+        y[:-offset] = y[offset:]
+        y[-offset:] = 0
+        # line = pg.draw.lines(
+        #     self.surface,
+        #     BLACK,
+        #     False,
+        #     list(zip(*(x[::1000], y[::1000])))
+        # )
+
+    def set_mic_level(self, scale):
+        radius = self.min_radius + int(scale * (self.max_radius - self.min_radius))
+
+        pg.draw.circle(
+            self.surface,
+            (200, 100, 100),
+            (self.max_radius, self.max_radius),
+            radius
+        )
+        pg.draw.circle(
+            self.surface,
+            BLACK,
+            (self.max_radius, self.max_radius),
+            self.min_radius
+        )
 
 class GUI(AppService):
 
@@ -141,41 +192,36 @@ class GUI(AppService):
         self.screen = pg.display.set_mode((GUI_WIDTH, GUI_HEIGHT), 0, 32)
         pg.display.set_caption("Live Mic Recording")
         self.screen.fill(WHITE)
+        self.screen.set_alpha(None)
+
+        self.mic_panels = [
+            MicPanel(0, 120 * i, 600, 100)
+            for i in range(app.channels)
+        ]
         self.last_threshold_ratio = 0
+        pg.display.update()
 
     def handle(self, message_type, **kwargs):
         if message_type is MessageType.SOUND_RECEIVED:
             buffer = kwargs["data"]
-            self.draw_sound(buffer)
+            last_updated = kwargs["time"]
+            self.draw_sound(buffer, last_updated)
         elif message_type is MessageType.ABOVE_THRESHOLD:
-            ratio = kwargs["ratio"]
-            self.last_threshold_ratio = ratio
+            ratios = kwargs["ratios"]
+            self.last_threshold_ratios = ratios
 
-    def draw_sound(self, buffer):
+    def draw_sound(self, buffer, last_updated):
         """Render new data on microphone channels
         """
-        plot_buffer = buffer[-int(RATE * 2):, 0]
-
-        # Draw a red circle to indicate how the sound compares to threshold
-        scale = 1 - np.exp(-self.last_threshold_ratio)
-        radius = 20 + int(scale * 30)
-
         self.screen.fill(WHITE)
-        pg.draw.circle(
-            self.screen,
-            (200, 100, 100) if self.last_threshold_ratio > 0.5 else BLACK,
-            (100, 100),
-            radius
-        )
-        pg.draw.circle(self.screen, BLACK, (100, 100), 30)
 
-        # Plot the sound pressure waveform
-        line = pg.draw.aalines(
-            self.screen,
-            BLACK,
-            False,
-            list(zip(*(np.linspace(160, 550, len(plot_buffer)), 100 + plot_buffer / 100.0)))
-        )
+        dt = time.time() - last_updated
+        plot_buffer = buffer[-int(RATE * 2):]
+        for ch_idx, panel in enumerate(self.mic_panels):
+            scale = 1 - np.exp(-self.last_threshold_ratios[ch_idx])  # TODO: make last_threshold_ratio per channel
+            panel.set_data(plot_buffer[:, ch_idx], int(RATE * dt))
+            panel.set_mic_level(scale)
+            panel.draw(self.screen)
 
         pg.display.update()
 
@@ -203,7 +249,7 @@ class FileSaver(AppService):
                 scipy.io.wavfile.write(
                     os.path.join(self.folder, "basename_{}_{}.wav".format(self.basename, self.counter)),
                     fs,
-                    data.flatten()# .astype(np.float32, order='C') / 32768.0
+                    data# .astype(np.float32, order='C') / 32768.0
                 )
                 self.counter += 1
 
@@ -212,10 +258,12 @@ class RingBuffer(object):
 
     def __init__(self, shape):
         self.data = np.zeros(shape, dtype=np.int16)
+        self.last_updated = time.time()
 
     def capture(self, data):
         self.data[:-len(data)] = self.data[len(data):]
         self.data[-len(data):] = data
+        self.last_updated = time.time()
 
 
 class MicrophoneListener(AppService):
@@ -223,11 +271,11 @@ class MicrophoneListener(AppService):
     def __init__(self, app, device=None):
         super(MicrophoneListener, self).__init__(app)
         self.device = device
-        self.ringbuffer = RingBuffer((int(RATE * 20.0), CHANNELS))
+        self.ringbuffer = RingBuffer((int(RATE * 20.0), self.app.channels))
         self.captured = 0
         self.stream = p.open(
             format=pyaudio.paInt16,
-            channels=CHANNELS,
+            channels=self.app.channels,
             rate=RATE,
             frames_per_buffer=CHUNK,
             input=True,
@@ -257,7 +305,10 @@ class MicrophoneListener(AppService):
                 self.recording_off()
         elif message_type == MessageType.LOOP:
             if self.stream.is_active():
-                self.emit(MessageType.SOUND_RECEIVED, data=self.ringbuffer.data)
+                self.emit(MessageType.SOUND_RECEIVED,
+                    data=self.ringbuffer.data[:],
+                    time=self.ringbuffer.last_updated
+                )
         elif message_type == MessageType.LISTENING:
             on = kwargs["on"]
             if on is True:
@@ -270,12 +321,12 @@ class MicrophoneListener(AppService):
     def recording_on(self):
         # refers to number of samples before onset to collect data
         self.captured_since = int(SILENT_BUFFER * RATE)
-        print(" recording *    ", end="\r")
+        print("\n recording *    ", end="\r")
         self.recording = True
 
     def recording_off(self):
         self.recording = False
-        print(" end recording *    ", end="\r")
+        print("\n end recording *    ", end="\r")
         self.emit(
             MessageType.RECORDING_CAPTURED,
             data=self.ringbuffer.data[-self.captured_since:],
@@ -287,8 +338,41 @@ class MicrophoneListener(AppService):
         self.stream.close()
 
 
+# class App(object):
+#     def __init__(self, channels=1):
+#         self.channels = channels
+#         self.clock = pg.time.Clock()
+#         self.pubsub = PubSub()
+#
+#     def run(self):
+#         try:
+#             while True:
+#                 for event in pg.event.get():
+#                     if event.type == pg.QUIT:
+#                         self.pubsub.emit(MessageType.CLOSING)
+#                         pg.quit()
+#                         sys.exit()
+#
+#                 self.pubsub.emit(MessageType.LOOP)
+#                 self.clock.tick(60)  # 60 fps why not
+#                 print(self.clock.get_fps())
+#
+#         except KeyboardInterrupt:
+#             self.pubsub.emit(MessageType.CLOSING)
+#             pg.quit()
+#             sys.exit()
+
+from PyQt5 import QtWidgets as widgets
+from PyQt5.QtCore import QTimer, pyqtSignal
+from PyQt5 import QtGui as gui
+import sys
+# import ui_main
+import numpy as np
+import pyqtgraph
+
 class App(object):
-    def __init__(self):
+    def __init__(self, channels=1):
+        self.channels = channels
         self.clock = pg.time.Clock()
         self.pubsub = PubSub()
 
@@ -302,19 +386,69 @@ class App(object):
                         sys.exit()
 
                 self.pubsub.emit(MessageType.LOOP)
-                self.clock.tick(60)  # 60 fps why not
+                self.clock.tick(120)  # 60 fps why not
+                print("fps: ", self.clock.get_fps(), end="\r")
+
         except KeyboardInterrupt:
             self.pubsub.emit(MessageType.CLOSING)
             pg.quit()
             sys.exit()
 
+import sys
+from PyQt5.QtWidgets import (QWidget, QLineEdit, QGridLayout,QLabel, QApplication)
+import pyqtgraph
 
-if __name__ == "__main__":
-    app = App()
+class Window(widgets.QWidget):
+    def __init__(self):
+        super(Window, self).__init__()
+        self.edit = widgets.QLineEdit('TSLA', self)
+        self.label = widgets.QLabel('-', self)
+        self.guiplot = pyqtgraph.PlotWidget()
+        self.guiplot.setYRange(-1000, 1000, padding=0)
 
-    # Initialize pyaudio and pygame libraries
-    p = pyaudio.PyAudio()
-    pg.init()
+        # self.guiplot.enableAutoRange()
+        self.guiplot2 = pyqtgraph.PlotWidget()
+        self.guiplot2.setYRange(-1000, 1000, padding=0)
+        # self.guiplot2.enableAutoRange()
+
+        layout = QGridLayout(self)
+        layout.addWidget(self.edit, 0, 0)
+        layout.addWidget(self.label, 1, 0)
+        layout.addWidget(self.guiplot, 2, 0, 3, 3)
+        layout.addWidget(self.guiplot2, 5, 0, 3, 3)
+
+        self.prevBar = None
+        self.bars = None
+
+    def handle(self, message_type, **kwargs):
+        if message_type is MessageType.SOUND_RECEIVED:
+            buffer = kwargs["data"]
+            last_updated = kwargs["time"]
+            self.update(buffer, last_updated)
+
+    def update(self, buffer, last_updated):
+        dt = time.time() - last_updated
+        plot_buffer = buffer[-int(RATE * 2)::10]
+        # for ch_idx, panel in enumerate([0, 1]):
+            # scale = 1 - np.exp(-self.last_threshold_ratios[ch_idx])  # TODO: make last_threshold_ratio per channel
+        data = plot_buffer[:]
+        # oint(RATE * dt)
+        # panel.set_mic_level(scale)
+        # panel.draw(self.screen)
+        self.guiplot.plot([0, len(data)], [200, 200], clear=True, color="red")
+        self.guiplot.plot(data[:, 0])
+        self.guiplot2.plot(data[:, 1], clear=True)
+
+            # pg.display.update()
+
+
+
+# Initialize pyaudio and pygame libraries
+p = pyaudio.PyAudio()
+pg.init()
+
+
+def run():
 
     # Locate listening device?
     # info = p.get_host_api_info_by_index(0)
@@ -323,21 +457,29 @@ if __name__ == "__main__":
     #     if (p.get_device_info_by_host_api_device_index(0, i).get('maxInputChannels')) > 0:
     #         print("Input Device id ", i, " - ", p.get_device_info_by_host_api_device_index(0, i).get('name'))
     # print(p.get_default_input_device_info())
+    app2 = QApplication(sys.argv)
+    window = Window()
+    window.show()
+
+    app = App(channels=2)
 
     # Setup services
-    gui = GUI(app)
+    # gui = GUI(app)
     detector = SoundDetector(app)
     mics = MicrophoneListener(app)
     filesaver = FileSaver(
         app,
-        "/Users/kevinyu/Projects/bg_audio/temp", "birdy",
+        "/Users/kevinyu/Projects/bg_audio/temp",
+        "birdy",
         min_duration=0.2 + 2 * SILENT_BUFFER,
     )
 
     # Subscribe
     app.pubsub.subscribe(MessageType.SOUND_RECEIVED, detector)
-    app.pubsub.subscribe(MessageType.SOUND_RECEIVED, gui)
-    app.pubsub.subscribe(MessageType.ABOVE_THRESHOLD, gui)
+    # app.pubsub.subscribe(MessageType.SOUND_RECEIVED, gui)
+    app.pubsub.subscribe(MessageType.SOUND_RECEIVED, window)
+
+    # app.pubsub.subscribe(MessageType.ABOVE_THRESHOLD, gui)
     app.pubsub.subscribe(MessageType.RECORDING_CAPTURED, filesaver)
     app.pubsub.subscribe(MessageType.RECORDING, mics)
     app.pubsub.subscribe(MessageType.LISTENING, mics)
@@ -347,3 +489,9 @@ if __name__ == "__main__":
     app.run()
 
     p.terminate()
+
+    sys.exit(app.exec_())
+
+
+if __name__ == "__main__":
+    run()

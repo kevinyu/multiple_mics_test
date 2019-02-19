@@ -7,4 +7,3 @@ pyFFTW==0.11.1
 pygame==1.9.4
 scipy==1.2.0
 sounddevice==0.3.12
-soundsig==1.2
