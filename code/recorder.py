@@ -370,37 +370,15 @@ import sys
 import numpy as np
 import pyqtgraph
 
-class App(object):
-    def __init__(self, channels=1):
-        self.channels = channels
-        self.clock = pg.time.Clock()
-        self.pubsub = PubSub()
-
-    def run(self):
-        try:
-            while True:
-                for event in pg.event.get():
-                    if event.type == pg.QUIT:
-                        self.pubsub.emit(MessageType.CLOSING)
-                        pg.quit()
-                        sys.exit()
-
-                self.pubsub.emit(MessageType.LOOP)
-                self.clock.tick(120)  # 60 fps why not
-                print("fps: ", self.clock.get_fps(), end="\r")
-
-        except KeyboardInterrupt:
-            self.pubsub.emit(MessageType.CLOSING)
-            pg.quit()
-            sys.exit()
 
 import sys
 from PyQt5.QtWidgets import (QWidget, QLineEdit, QGridLayout,QLabel, QApplication)
 import pyqtgraph
 
 class Window(widgets.QWidget):
-    def __init__(self):
+    def __init__(self, channels=1):
         super(Window, self).__init__()
+        self.channels = channels
         self.edit = widgets.QLineEdit('TSLA', self)
         self.label = widgets.QLabel('-', self)
         self.guiplot = pyqtgraph.PlotWidget()
@@ -419,6 +397,13 @@ class Window(widgets.QWidget):
 
         self.prevBar = None
         self.bars = None
+        self.timer = QTimer()
+        self.timer.start(1/60)
+        self.timer.timeout.connect(self._loop)
+        self.pubsub = PubSub()
+
+    def _loop(self):
+        self.pubsub.emit(MessageType.LOOP)
 
     def handle(self, message_type, **kwargs):
         if message_type is MessageType.SOUND_RECEIVED:
@@ -458,39 +443,37 @@ def run():
     #         print("Input Device id ", i, " - ", p.get_device_info_by_host_api_device_index(0, i).get('name'))
     # print(p.get_default_input_device_info())
     app2 = QApplication(sys.argv)
-    window = Window()
-    window.show()
 
-    app = App(channels=2)
+    window = Window(channels=2)
+    window.show()
 
     # Setup services
     # gui = GUI(app)
-    detector = SoundDetector(app)
-    mics = MicrophoneListener(app)
+    detector = SoundDetector(window)
+    mics = MicrophoneListener(window)
     filesaver = FileSaver(
-        app,
-        "/Users/kevinyu/Projects/bg_audio/temp",
+        window,
+        "/auto/fhome/kevin/temp/stimuli",
         "birdy",
         min_duration=0.2 + 2 * SILENT_BUFFER,
     )
 
     # Subscribe
-    app.pubsub.subscribe(MessageType.SOUND_RECEIVED, detector)
+    window.pubsub.subscribe(MessageType.SOUND_RECEIVED, detector)
     # app.pubsub.subscribe(MessageType.SOUND_RECEIVED, gui)
-    app.pubsub.subscribe(MessageType.SOUND_RECEIVED, window)
+    window.pubsub.subscribe(MessageType.SOUND_RECEIVED, window)
 
     # app.pubsub.subscribe(MessageType.ABOVE_THRESHOLD, gui)
-    app.pubsub.subscribe(MessageType.RECORDING_CAPTURED, filesaver)
-    app.pubsub.subscribe(MessageType.RECORDING, mics)
-    app.pubsub.subscribe(MessageType.LISTENING, mics)
-    app.pubsub.subscribe(MessageType.LOOP, mics)
-    app.pubsub.subscribe(MessageType.CLOSING, mics)
+    window.pubsub.subscribe(MessageType.RECORDING_CAPTURED, filesaver)
+    window.pubsub.subscribe(MessageType.RECORDING, mics)
+    window.pubsub.subscribe(MessageType.LISTENING, mics)
+    window.pubsub.subscribe(MessageType.LOOP, mics)
+    window.pubsub.subscribe(MessageType.CLOSING, mics)
 
-    app.run()
+    sys.exit(app2.exec_())
 
     p.terminate()
 
-    sys.exit(app.exec_())
 
 
 if __name__ == "__main__":
