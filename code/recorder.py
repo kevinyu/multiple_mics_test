@@ -3,6 +3,9 @@ PyAudio Example: Make a wire between input and output (i.e., record a
 few samples and play them back immediately).
 """
 from __future__ import print_function
+
+import matplotlib
+matplotlib.use("agg")
 import os
 import sys
 import time
@@ -12,6 +15,8 @@ import numpy as np
 import pyaudio
 import pygame as pg
 import scipy.io.wavfile
+
+from soundsig.signal import bandpass_filter
 
 
 CHUNK = 1024 * 4
@@ -89,7 +94,7 @@ class SoundDetector(AppService):
                 buffer_duration=SILENT_BUFFER,
                 max_time=10.0,
                 detection_window=1024 * 4,
-                amp_threshold=200,
+                amp_threshold=500,
             ):
         super(SoundDetector, self).__init__(app)
         self.recording = False
@@ -123,6 +128,7 @@ class SoundDetector(AppService):
 
     def above_threshold(self, buffer):
         detection_window = buffer[-self.detection_window:]
+        data = bandpass_filter(detection_window.T, RATE, 100, 10000).T
 
         ratios = {}
         did_exceed_threshold = False
@@ -131,7 +137,8 @@ class SoundDetector(AppService):
                 np.diff(detection_window[:, ch_idx] > self.amp_threshold)
             )[0]
             ratios[ch_idx] = int(threshold_crossings.size) / CROSSINGS_THRESHOLD
-            if ratios[ch_idx] > CROSSINGS_THRESHOLD:
+
+            if ratios[ch_idx] > 1:
                 did_exceed_threshold = True
 
         self.emit(
@@ -275,6 +282,7 @@ class MicrophoneListener(AppService):
         self.captured = 0
         self.stream = p.open(
             format=pyaudio.paInt16,
+            input_device_index=2,
             channels=self.app.channels,
             rate=RATE,
             frames_per_buffer=CHUNK,
@@ -285,11 +293,11 @@ class MicrophoneListener(AppService):
         self.recording = False
 
     def callback(self, in_data, frame_count, time_info, status):
-        data = np.frombuffer(in_data, dtype=np.int16)
-        if data.ndim == 1:
-            data = data[:, None]
+        data = np.frombuffer(in_data, dtype=np.int16)[:]
 
-        self.ringbuffer.capture(data)
+        self.ringbuffer.capture(np.array([
+            data[idx::self.app.channels] for idx in range(self.app.channels)
+        ]).T)
 
         if self.recording is True:
             self.captured_since += len(data)
@@ -383,10 +391,16 @@ class Window(widgets.QWidget):
         self.label = widgets.QLabel('-', self)
         self.guiplot = pyqtgraph.PlotWidget()
         self.guiplot.setYRange(-1000, 1000, padding=0)
+        # self.guiplot.disableAutoRange()
+
+        self.curve = None
+        self.curve2 = None
+
 
         # self.guiplot.enableAutoRange()
         self.guiplot2 = pyqtgraph.PlotWidget()
         self.guiplot2.setYRange(-1000, 1000, padding=0)
+        # self.guiplot2.setYRange(-1000, 1000, padding=0)
         # self.guiplot2.enableAutoRange()
 
         layout = QGridLayout(self)
@@ -420,11 +434,18 @@ class Window(widgets.QWidget):
         # oint(RATE * dt)
         # panel.set_mic_level(scale)
         # panel.draw(self.screen)
-        self.guiplot.plot([0, len(data)], [200, 200], clear=True, color="red")
-        self.guiplot.plot(data[:, 0])
-        self.guiplot2.plot(data[:, 1], clear=True)
+        # self.guiplot.plot([0, len(data)], [200, 200], clear=True, color="red")
 
-            # pg.display.update()
+        data = bandpass_filter(data.T, RATE, 100, 10000).T
+        if self.curve is None:
+            self.curve = self.guiplot.plot(data[:, 0], clear=True)
+        else:
+            self.curve.setData(data[:, 0])
+
+        if self.curve2 is None:
+            self.curve2 = self.guiplot2.plot(data[:, 1], clear=True)
+        else:
+            self.curve2.setData(data[:, 1])
 
 
 
