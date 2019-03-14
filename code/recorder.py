@@ -8,18 +8,24 @@ import matplotlib
 matplotlib.use("agg")
 import os
 import sys
+from queue import Queue
 import time
 from threading import Thread
 
 import numpy as np
 import pyaudio
-import pygame as pg
 import scipy.io.wavfile
 
 from soundsig.signal import bandpass_filter
+import sys
+from PyQt5.QtWidgets import (QWidget, QLineEdit, QGridLayout,QLabel, QApplication)
+from PyQt5 import QtWidgets as widgets
+from PyQt5.QtCore import QTimer, pyqtSignal
+from PyQt5 import QtGui as gui
+import pyqtgraph as pg
 
 
-CHUNK = 1024 * 4
+CHUNK = 512 * 1
 WIDTH = 2
 GUI_WIDTH = 640
 GUI_HEIGHT = 480
@@ -27,6 +33,7 @@ GUI_HEIGHT = 480
 RATE = 30000
 SILENT_BUFFER = 1.0
 CROSSINGS_THRESHOLD = 0.2 * 200 # (heuristic: 200 crossings per second during sound)
+AMP_THRESHOLD = 100
 WHITE = (255,255,255) #RGB
 BLACK = (0,0,0) #RGB
 
@@ -39,6 +46,7 @@ class MessageType(object):
     CLOSING = "closing"
     LISTENING = "listening"
     LOOP = "loop"
+    CHUNK = "chunk"
 
 
 class PubSub(object):
@@ -128,7 +136,7 @@ class SoundDetector(AppService):
 
     def above_threshold(self, buffer):
         detection_window = buffer[-self.detection_window:]
-        data = bandpass_filter(detection_window.T, RATE, 100, 10000).T
+        # data = bandpass_filter(detection_window.T, RATE, 100, 10000).T
 
         ratios = {}
         did_exceed_threshold = False
@@ -282,7 +290,7 @@ class MicrophoneListener(AppService):
         self.captured = 0
         self.stream = p.open(
             format=pyaudio.paInt16,
-            input_device_index=2,
+            # input_device_index=2,
             channels=self.app.channels,
             rate=RATE,
             frames_per_buffer=CHUNK,
@@ -293,14 +301,19 @@ class MicrophoneListener(AppService):
         self.recording = False
 
     def callback(self, in_data, frame_count, time_info, status):
+        if status != 0:
+            print("why")
         data = np.frombuffer(in_data, dtype=np.int16)[:]
 
-        self.ringbuffer.capture(np.array([
+        new_data = np.array([
             data[idx::self.app.channels] for idx in range(self.app.channels)
-        ]).T)
+        ]).T
+        self.ringbuffer.capture(new_data)
 
         if self.recording is True:
-            self.captured_since += len(data)
+            self.captured_since += len(new_data)
+
+        self.emit(MessageType.CHUNK, data=new_data)
 
         return (in_data, pyaudio.paContinue)
 
@@ -346,112 +359,138 @@ class MicrophoneListener(AppService):
         self.stream.close()
 
 
-# class App(object):
-#     def __init__(self, channels=1):
-#         self.channels = channels
-#         self.clock = pg.time.Clock()
-#         self.pubsub = PubSub()
-#
-#     def run(self):
-#         try:
-#             while True:
-#                 for event in pg.event.get():
-#                     if event.type == pg.QUIT:
-#                         self.pubsub.emit(MessageType.CLOSING)
-#                         pg.quit()
-#                         sys.exit()
-#
-#                 self.pubsub.emit(MessageType.LOOP)
-#                 self.clock.tick(60)  # 60 fps why not
-#                 print(self.clock.get_fps())
-#
-#         except KeyboardInterrupt:
-#             self.pubsub.emit(MessageType.CLOSING)
-#             pg.quit()
-#             sys.exit()
+class SpectrogramWidget(pg.PlotWidget):
+    """Live spectrogram widgets
 
-from PyQt5 import QtWidgets as widgets
-from PyQt5.QtCore import QTimer, pyqtSignal
-from PyQt5 import QtGui as gui
-import sys
-# import ui_main
-import numpy as np
-import pyqtgraph
+    Based off code from here: http://amyboyle.ninja/Pyqtgraph-live-spectrogram
+    """
+
+    def __init__(self, chunk_size, min_freq=500, max_freq=8000, window=5, cmap=None):
+        super(SpectrogramWidget, self).__init__()
+        self.img = pg.ImageItem()
+        self.addItem(self.img)
+
+        self.chunk_size = chunk_size
+        freq = (
+            np.arange((self.chunk_size // 2) + 1) /
+            (float(self.chunk_size) / RATE)
+        )
+        self.freq_mask = np.where((min_freq < freq) & (freq < max_freq))[0]
+        self.img_array = np.zeros((window * int(RATE / CHUNK), len(freq[self.freq_mask])))
+
+        self.cmap = self.get_cmap() if cmap is None else cmap
+        lut = self.cmap.getLookupTable(0.0, 1.0, 256)
+
+        self.img.setLookupTable(lut)
+        self.img.setLevels([-50,40])
+
+        yscale = 1.0 / (self.img_array.shape[1] / freq[self.freq_mask][-1])
+        self.img.scale((1. / RATE) * self.chunk_size, yscale)
+        self.win = np.hanning(self.chunk_size)
+
+    def get_cmap(self):
+        pos = np.array([0.3, 1])
+        color = np.array([
+            (255,255,255,255),
+            (0, 0, 0, 255)
+        ], dtype=np.ubyte)
+        cmap = pg.ColorMap(pos, color)
+
+        return cmap
+
+    def push_data(self, chunk):
+        # normalized, windowed frequencies in data chunk
+        spec = np.fft.rfft(chunk * self.win) / self.chunk_size
+        psd = abs(spec) ** 2           # magnitude
+        psd = 20 * np.log10(psd)       # to dB scale
+
+        self.img_array = np.roll(self.img_array, -1, 0)
+        self.img_array[-1:] = psd[self.freq_mask]
+
+    def update_data(self):
+        self.img.setImage(self.img_array, autoLevels=False)
 
 
-import sys
-from PyQt5.QtWidgets import (QWidget, QLineEdit, QGridLayout,QLabel, QApplication)
-import pyqtgraph
+class GUI(widgets.QWidget):
 
-class Window(widgets.QWidget):
-    def __init__(self, channels=1):
-        super(Window, self).__init__()
+    def __init__(self, channels=1, threshold=100):
+        super(GUI, self).__init__()
         self.channels = channels
-        self.edit = widgets.QLineEdit('TSLA', self)
-        self.label = widgets.QLabel('-', self)
-        self.guiplot = pyqtgraph.PlotWidget()
-        self.guiplot.setYRange(-1000, 1000, padding=0)
-        # self.guiplot.disableAutoRange()
 
-        self.curve = None
-        self.curve2 = None
-
-
-        # self.guiplot.enableAutoRange()
-        self.guiplot2 = pyqtgraph.PlotWidget()
-        self.guiplot2.setYRange(-1000, 1000, padding=0)
-        # self.guiplot2.setYRange(-1000, 1000, padding=0)
-        # self.guiplot2.enableAutoRange()
+        self.t_window = 5
+        self.skip = 10
+        self.specs = [SpectrogramWidget(CHUNK, min_freq=100, max_freq=6000, window=self.t_window) for channel in range(self.channels)]
+        self.waveforms = [pg.PlotWidget() for channel in range(self.channels)]
+        self.curves = [self.waveforms[ch_idx].plot(np.zeros(self.t_window * RATE), clear=True) for ch_idx in range(self.channels)]
+        self.threhsolds = [
+            self.waveforms[ch_idx].plot([0, int(self.t_window * RATE) // self.skip], [threshold, threshold])
+            for ch_idx in range(self.channels)
+        ]
 
         layout = QGridLayout(self)
-        layout.addWidget(self.edit, 0, 0)
-        layout.addWidget(self.label, 1, 0)
-        layout.addWidget(self.guiplot, 2, 0, 3, 3)
-        layout.addWidget(self.guiplot2, 5, 0, 3, 3)
 
-        self.prevBar = None
-        self.bars = None
-        self.timer = QTimer()
-        self.timer.start(1/60)
-        self.timer.timeout.connect(self._loop)
-        self.pubsub = PubSub()
+        for ch_idx in range(self.channels):
+            label = widgets.QLabel("Channel {}".format(ch_idx), self)
+            layout.addWidget(label, 3 * ch_idx, 0, 1, 1)
+            layout.setRowStretch(0, 0.5)
 
-    def _loop(self):
-        self.pubsub.emit(MessageType.LOOP)
+            layout.addWidget(self.specs[ch_idx], 1 + 3 * ch_idx, 0, 1, 2)
+            layout.setRowStretch(1 + 3 * ch_idx, 3)
+            self.specs[ch_idx].hideAxis('left')
+            self.specs[ch_idx].hideAxis('bottom')
+
+            layout.addWidget(self.waveforms[ch_idx], 2 + 3 * ch_idx, 0, 1, 2)
+            layout.setRowStretch(2 + 3 * ch_idx, 1)
+            self.waveforms[ch_idx].setYRange(-500, 500, padding=0)
+            self.waveforms[ch_idx].hideAxis('left')
+            self.waveforms[ch_idx].hideAxis('bottom')
+
+        self.chunks_to_consume = Queue()
+        self.setMinimumSize(600, 300)
 
     def handle(self, message_type, **kwargs):
         if message_type is MessageType.SOUND_RECEIVED:
             buffer = kwargs["data"]
             last_updated = kwargs["time"]
             self.update(buffer, last_updated)
+        elif message_type is MessageType.CHUNK:
+            data = kwargs["data"]
+            self.chunks_to_consume.put(data)
 
     def update(self, buffer, last_updated):
-        dt = time.time() - last_updated
-        plot_buffer = buffer[-int(RATE * 2)::10]
-        # for ch_idx, panel in enumerate([0, 1]):
-            # scale = 1 - np.exp(-self.last_threshold_ratios[ch_idx])  # TODO: make last_threshold_ratio per channel
+        plot_buffer = buffer[-int(RATE * self.t_window)::self.skip]
         data = plot_buffer[:]
-        # oint(RATE * dt)
-        # panel.set_mic_level(scale)
-        # panel.draw(self.screen)
-        # self.guiplot.plot([0, len(data)], [200, 200], clear=True, color="red")
+        # data = bandpass_filter(data.T, RATE, 100, 10000).T
 
-        data = bandpass_filter(data.T, RATE, 100, 10000).T
-        if self.curve is None:
-            self.curve = self.guiplot.plot(data[:, 0], clear=True)
-        else:
-            self.curve.setData(data[:, 0])
+        for _ in range(self.chunks_to_consume.qsize()):
+            chunk = self.chunks_to_consume.get()
+            for ch_idx in range(self.channels):
+                self.specs[ch_idx].push_data(chunk[:, ch_idx])
+        for ch_idx in range(self.channels):
+            self.specs[ch_idx].update_data()
 
-        if self.curve2 is None:
-            self.curve2 = self.guiplot2.plot(data[:, 1], clear=True)
-        else:
-            self.curve2.setData(data[:, 1])
+        for ch_idx in range(self.channels):
+            self.curves[ch_idx].setData(data[:, ch_idx])
 
 
+class App(QApplication):
+    def __init__(self, *args, **kwargs):
+        self.channels = kwargs.pop("channels")
+        super(App, self).__init__(*args, **kwargs)
+        self.pubsub = PubSub()
 
-# Initialize pyaudio and pygame libraries
-p = pyaudio.PyAudio()
-pg.init()
+        # Run the main loop
+        self.timer = QTimer()
+        self.timer.start(1000 * (1 / 144))
+        self.timer.timeout.connect(self._loop)
+
+    def _loop(self):
+        self.pubsub.emit(MessageType.LOOP)
+
+
+
+# Initialize pyaudio
+# pg.init()
 
 
 def run():
@@ -463,39 +502,38 @@ def run():
     #     if (p.get_device_info_by_host_api_device_index(0, i).get('maxInputChannels')) > 0:
     #         print("Input Device id ", i, " - ", p.get_device_info_by_host_api_device_index(0, i).get('name'))
     # print(p.get_default_input_device_info())
-    app2 = QApplication(sys.argv)
+    app = App(sys.argv, channels=1)
 
-    window = Window(channels=2)
+    window = GUI(channels=app.channels, threshold=AMP_THRESHOLD)
     window.show()
 
     # Setup services
     # gui = GUI(app)
-    detector = SoundDetector(window)
-    mics = MicrophoneListener(window)
+    detector = SoundDetector(app, amp_threshold=AMP_THRESHOLD)
+    mics = MicrophoneListener(app)
     filesaver = FileSaver(
-        window,
-        "/auto/fhome/kevin/temp/stimuli",
-        "birdy",
+        app,
+        "./temp/sounds",
+        "feb27_morn_3",
         min_duration=0.2 + 2 * SILENT_BUFFER,
     )
 
     # Subscribe
-    window.pubsub.subscribe(MessageType.SOUND_RECEIVED, detector)
-    # app.pubsub.subscribe(MessageType.SOUND_RECEIVED, gui)
-    window.pubsub.subscribe(MessageType.SOUND_RECEIVED, window)
+    app.pubsub.subscribe(MessageType.SOUND_RECEIVED, detector)
+    app.pubsub.subscribe(MessageType.SOUND_RECEIVED, window)
+    app.pubsub.subscribe(MessageType.CHUNK, window)
+    app.pubsub.subscribe(MessageType.RECORDING_CAPTURED, filesaver)
+    app.pubsub.subscribe(MessageType.RECORDING, mics)
+    app.pubsub.subscribe(MessageType.LISTENING, mics)
+    app.pubsub.subscribe(MessageType.LOOP, mics)
+    app.pubsub.subscribe(MessageType.CLOSING, mics)
 
-    # app.pubsub.subscribe(MessageType.ABOVE_THRESHOLD, gui)
-    window.pubsub.subscribe(MessageType.RECORDING_CAPTURED, filesaver)
-    window.pubsub.subscribe(MessageType.RECORDING, mics)
-    window.pubsub.subscribe(MessageType.LISTENING, mics)
-    window.pubsub.subscribe(MessageType.LOOP, mics)
-    window.pubsub.subscribe(MessageType.CLOSING, mics)
-
-    sys.exit(app2.exec_())
+    sys.exit(app.exec_())
 
     p.terminate()
 
 
+p = pyaudio.PyAudio()
 
 if __name__ == "__main__":
     run()
