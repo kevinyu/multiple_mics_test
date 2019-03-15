@@ -1,45 +1,151 @@
 import collections
 import logging
+import time
+
+import os
+import scipy.io.wavfile
 
 import numpy as np
+from PyQt5.QtCore import pyqtSignal, pyqtSlot, QThread, QObject, QTimer
 
+from settings import Settings
+import itertools
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
-class MicrophoneListener(object):
+class MicrophoneListener(QObject):
+
+    IN = pyqtSignal(object)
+    OUT = pyqtSignal()
+
+    @pyqtSlot(object)
     def receive_data(self, data):
         logger.info("{} received data of size {}".format(
             self, data.shape))
 
+    def start(self):
+        self._thread = QThread(self)
+        self.moveToThread(self._thread)
+        self._thread.start()
+        self.IN.connect(self.receive_data)
+
+    def stop(self):
+        self._thread.terminate()
+
 
 class SoundDetector(MicrophoneListener):
-    def __init__(self, size):
+
+    def __init__(self, size, parent=None):
+        super(SoundDetector, self).__init__(parent)
         self._buffer = collections.deque(maxlen=size)
 
+    @pyqtSlot(object)
     def receive_data(self, data):
         self._buffer.extend(data)
 
+        dat = np.array(self._buffer)
+
+        for ch_idx in range(dat.shape[1]):
+            threshold_crossings = np.nonzero(
+                np.diff(dat[:, ch_idx] > Settings.DETECTION_AMP_THRESHOLD)
+            )[0]
+            ratio = int(threshold_crossings.size) / Settings.DETECTION_CROSSINGS_PER_CHUNK
+
+            if ratio > 1:
+                self.OUT.emit()
+                break
+
 
 class SoundSaver(MicrophoneListener):
-    def __init__(self, size):
+
+    def __init__(
+            self,
+            size,
+            path,
+            triggered=False,
+            filename_format="recording{}.wav",
+            min_size=None,
+            sampling_rate=44100,
+            parent=None
+        ):
         """
         Parameters
         ----------
         size : int
             Size of each file to be saved in samples
         """
+        super(SoundSaver, self).__init__(parent)
         self._buffer = collections.deque()
+        self._save_buffer = collections.deque()
         self._idx = 0
+        self.path = path
+        self.triggered = triggered
+        self.min_size = min_size
+        self.sampling_rate = sampling_rate
+        self.filename_format = filename_format
+        self._file_idx = 0
         self.size = size
+        self._recording = False
+        self._trigger_timer = None
 
+        # self._trigger_timer.start(0.1)
+
+    def start_rec(self):
+        if self._trigger_timer:
+            self._trigger_timer.stop()
+            self._trigger_timer.deleteLater()
+
+        self._trigger_timer = QTimer(self)
+        self._trigger_timer.timeout.connect(self.stop_rec)
+        self._trigger_timer.setSingleShot(True)
+        self._trigger_timer.start(Settings.DETECTION_BUFFER * 1000)
+        self._recording = True
+
+    def stop_rec(self):
+        self._recording = False
+
+    @pyqtSlot()
+    def trigger(self):
+        self.start_rec()
+
+    def set_triggered(self, triggered):
+        self.triggered = triggered
+
+    @pyqtSlot(object)
     def receive_data(self, data):
         self._buffer.extend(data)
-        if len(self._buffer) > self.size:
-            data = np.array(self._buffer)
-            self._save(data[:self.size])
-            self._buffer.clear()
-            self._buffer.extend(data[self.size:])
+        if not self.triggered:
+            if len(self._buffer) > self.size:
+                data = np.array(self._buffer)
+                self._save(data[:self.size])
+                self._buffer.clear()
+                self._buffer.extend(data[self.size:])
+        if self.triggered:
+            if self._recording:
+                if not len(self._save_buffer):
+                    pre = itertools.islice(
+                        self._buffer,
+                        max(len(self._buffer) - int(Settings.DETECTION_BUFFER * Settings.RATE), 0),
+                        None
+                    )
+                    self._save_buffer.extend(pre)
+                else:
+                    self._save_buffer.extend(data)
+            else:
+                data_to_save = np.array(self._save_buffer)
+                if not self.min_size or len(data_to_save) > self.min_size:
+                    self._save(data_to_save)
+                self._save_buffer.clear()
 
     def _save(self, data):
-        print("saving", data.shape)
+        filename = self.filename_format.format(self._file_idx)
+        path = os.path.join(self.path, filename)
+        while os.path.exists(path):
+            self._file_idx += 1
+            filename = self.filename_format.format(self._file_idx)
+            path = os.path.join(self.path, filename)
+
+        print("\nSaving file to {}\n".format(path))
+        scipy.io.wavfile.write(path, self.sampling_rate, data)
