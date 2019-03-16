@@ -1,3 +1,5 @@
+import collections
+
 import pyqtgraph as pg
 import numpy as np
 
@@ -66,7 +68,7 @@ class SpectrogramWidget(pg.PlotWidget):
         )[0]
 
         self.img_array = np.zeros((
-            window * int(Settings.RATE / Settings.CHUNK),
+            int(window * Settings.RATE / Settings.CHUNK),
             len(freq[self.freq_mask])
         ))
         self.cmap = self.get_cmap() if cmap is None else cmap
@@ -90,7 +92,7 @@ class SpectrogramWidget(pg.PlotWidget):
         self._worker.OUT.connect(self.push_data)
 
     def get_cmap(self):
-        pos = np.array([0.5, 1])
+        pos = np.array([0.1, 0.7])
         color = np.array([
             (0,0,0,255),
             (255,255,255, 255)
@@ -109,4 +111,55 @@ class SpectrogramWidget(pg.PlotWidget):
 
     def show(self):
         self.img.setImage(self.img_array, autoLevels=False)
+
+
+class WaveformWidget(pg.PlotWidget):
+    """Live spectrogram widgets
+
+    Based off code from here:
+    http://amyboyle.ninja/Pyqtgraph-live-spectrogram
+    """
+
+    def __init__(
+            self,
+            chunk_size,
+            show_x=False,
+            window=5,
+            ylim=(0, Settings.MAX_POWER_THRESHOLD),
+            threshold=Settings.DEFAULT_POWER_THRESHOLD,
+        ):
+        super(WaveformWidget, self).__init__()
+        self._buffer = collections.deque(
+            maxlen=int(window * Settings.RATE / Settings.CHUNK)
+        )
+        '''
+        self._buffer = collections.deque(
+            maxlen=int(window * Settings.RATE)
+        )
+        '''
+        self._buffer.extend(np.zeros(self._buffer.maxlen))
+
+        self.showAxis("left", False)
+        self.showAxis("bottom", show_x)
+
+        self.chunk_size = chunk_size
+        self.curve = self.plot(np.array(self._buffer))
+        self.threshold = threshold
+        self.threshold_line = self.plot([0, self._buffer.maxlen], [self.threshold, self.threshold])
+
+        self.setMouseEnabled(False, False)
+        self.setMenuEnabled(False)
+        self.hideButtons()
+        self.setYRange(*ylim, padding=0)
+
+    def set_threshold(self, threshold):
+        self.threshold = threshold
+        self.threshold_line.setData([0, self._buffer.maxlen], [threshold, threshold])
+
+    def receive_data(self, chunk):
+        self._buffer.append(np.max(np.power(np.abs(chunk), 2)))
+        # self._buffer.extend(np.power(np.abs(chunk), 2))
+
+    def show(self):
+        self.curve.setData(np.array(self._buffer))
 

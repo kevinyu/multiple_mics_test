@@ -40,6 +40,10 @@ class SoundDetector(MicrophoneListener):
     def __init__(self, size, parent=None):
         super(SoundDetector, self).__init__(parent)
         self._buffer = collections.deque(maxlen=size)
+        self.thresholds = {}
+
+    def set_threshold(self, ch, threshold):
+        self.thresholds[ch] = threshold
 
     @pyqtSlot(object)
     def receive_data(self, data):
@@ -48,14 +52,20 @@ class SoundDetector(MicrophoneListener):
         dat = np.array(self._buffer)
 
         for ch_idx in range(dat.shape[1]):
+            if ch_idx not in self.thresholds:
+                self.thresholds[ch_idx] = Settings.DEFAULT_POWER_THRESHOLD
             threshold_crossings = np.nonzero(
-                np.diff(dat[:, ch_idx] > Settings.DETECTION_AMP_THRESHOLD)
+                np.diff(np.power(np.abs(dat[:, ch_idx]), 2) > self.thresholds[ch_idx])
             )[0]
+
             ratio = int(threshold_crossings.size) / Settings.DETECTION_CROSSINGS_PER_CHUNK
 
             if ratio > 1:
+                print("ON    ", end="\r")
                 self.OUT.emit()
                 break
+        else:
+            print("OFF   ", end="\r")
 
 
 class SoundSaver(MicrophoneListener):
@@ -140,6 +150,14 @@ class SoundSaver(MicrophoneListener):
                 self._save_buffer.clear()
 
     def _save(self, data):
+        if not self.path:
+            print("Warning: No path is configured")
+            return 
+
+        if not os.path.exists(self.path):
+            print("Warning: {} does not exist".format(self.path))
+            return
+
         filename = self.filename_format.format(self._file_idx)
         path = os.path.join(self.path, filename)
         while os.path.exists(path):
