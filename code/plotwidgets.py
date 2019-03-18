@@ -109,7 +109,7 @@ class SpectrogramWidget(pg.PlotWidget):
         self.img_array = np.roll(self.img_array, -1, 0)
         self.img_array[-1:] = psd[self.freq_mask]
 
-    def show(self):
+    def draw(self):
         self.img.setImage(self.img_array, autoLevels=False)
 
 
@@ -160,6 +160,6 @@ class WaveformWidget(pg.PlotWidget):
         self._buffer.append(np.max(np.power(np.abs(chunk), 2)))
         # self._buffer.extend(np.power(np.abs(chunk), 2))
 
-    def show(self):
+    def draw(self):
         self.curve.setData(np.array(self._buffer))
 

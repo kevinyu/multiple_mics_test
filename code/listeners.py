@@ -40,16 +40,29 @@ class SoundDetector(MicrophoneListener):
     def __init__(self, size, parent=None):
         super(SoundDetector, self).__init__(parent)
         self._buffer = collections.deque(maxlen=size)
+        self._channels = None
         self.thresholds = {}
+
+    def reset(self):
+        self._buffer.clear()
+        self._channels = None
 
     def set_threshold(self, ch, threshold):
         self.thresholds[ch] = threshold
 
     @pyqtSlot(object)
     def receive_data(self, data):
+        if self._channels is None:
+            self._channels = data.shape[1]
+        if data.shape[1] != self._channels:
+            return
+
         self._buffer.extend(data)
 
         dat = np.array(self._buffer)
+
+        if not len(dat):
+            return
 
         for ch_idx in range(dat.shape[1]):
             if ch_idx not in self.thresholds:
@@ -75,6 +88,7 @@ class SoundSaver(MicrophoneListener):
             size,
             path,
             triggered=False,
+            saving=False,
             filename_format="recording{}.wav",
             min_size=None,
             sampling_rate=44100,
@@ -91,6 +105,7 @@ class SoundSaver(MicrophoneListener):
         self._save_buffer = collections.deque()
         self._idx = 0
         self.path = path
+        self.saving = saving
         self.triggered = triggered
         self.min_size = min_size
         self.sampling_rate = sampling_rate
@@ -112,6 +127,12 @@ class SoundSaver(MicrophoneListener):
         self._trigger_timer.setSingleShot(True)
         self._trigger_timer.start(Settings.DETECTION_BUFFER * 1000)
         self._recording = True
+        self._channels = None
+
+    def reset(self):
+        self._buffer.clear()
+        self._save_buffer.clear()
+        self._channels = None
 
     def stop_rec(self):
         self._recording = False
@@ -123,9 +144,26 @@ class SoundSaver(MicrophoneListener):
     def set_triggered(self, triggered):
         self.triggered = triggered
 
+    def set_saving(self, saving):
+        self.saving = saving
+
     @pyqtSlot(object)
     def receive_data(self, data):
+        if self._channels is None:
+            self._channels = data.shape[1]
+
+        if data.shape[1] != self._channels:
+            self._buffer.clear()
+            self._save_buffer.clear()
+            return
+
+        if not self.saving:
+            self._buffer.clear()
+            self._save_buffer.clear()
+            return
+
         self._buffer.extend(data)
+
         if not self.triggered:
             if len(self._buffer) > self.size:
                 data = np.array(self._buffer)
@@ -150,6 +188,9 @@ class SoundSaver(MicrophoneListener):
                 self._save_buffer.clear()
 
     def _save(self, data):
+        if not self.saving:
+            return
+
         if not self.path:
             print("Warning: No path is configured")
             return 
