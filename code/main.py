@@ -100,7 +100,6 @@ class MainWindow(widgets.QMainWindow):
         self.program_controller = ProgramController(self)
 
         self.recording_window = RecordingWindow(self.channels, self)
-
         self.frame_timer = QTimer()
         self.frame_timer.start(1000 * 1.0/120.0)
         self.frame_timer.timeout.connect(self.recording_window._loop)
@@ -119,8 +118,15 @@ class MainWindow(widgets.QMainWindow):
     def init_ui(self):
         main_frame = widgets.QFrame(self)
         self.layout = widgets.QVBoxLayout()
+
+        self.scroll_area = widgets.QScrollArea(self)
+        self.scroll_area.setFixedHeight(650)
+        self.scroll_area.setFixedWidth(800)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setWidget(self.recording_window)
+
         self.layout.addWidget(self.program_controller)
-        self.layout.addWidget(self.recording_window)
+        self.layout.addWidget(self.scroll_area)
         main_frame.setLayout(self.layout)
 
         self.setCentralWidget(main_frame)
@@ -222,6 +228,8 @@ class MainWindow(widgets.QMainWindow):
             options=options)
 
         self.saver.path = path
+        display_path = str(os.path.join("/", "[...]", os.path.basename(os.path.dirname(path)), os.path.basename(path)))
+        self.program_controller.save_location.setText(display_path)
 
 
 class ProgramController(widgets.QFrame):
@@ -234,7 +242,8 @@ class ProgramController(widgets.QFrame):
     def init_ui(self):
         self.input_source = widgets.QComboBox(self)
         self.input_source_channels = widgets.QComboBox(self)
-        self.save_button = widgets.QPushButton("Select save location", self)
+        self.save_button = widgets.QPushButton("Set save location", self)
+        self.save_location = widgets.QLabel("(No path)", self)
 
         self.monitor_button = widgets.QRadioButton("Monitor only")
         self.monitor_button.setChecked(True)
@@ -259,11 +268,14 @@ class ProgramController(widgets.QFrame):
         layout.addWidget(widgets.QLabel("Channels:", parent=self), 2, 1)
         layout.addWidget(self.input_source_channels, 2, 2)
 
-        layout.setColumnStretch(4, 1)
-        layout.addWidget(self.save_button, 1, 4)
-        layout.addWidget(self.monitor_button, 2, 4)
-        layout.addWidget(self.trigger_button, 3, 4)
-        layout.addWidget(self.continuous_button, 4, 4)
+        # layout.setColumnStretch(3, 1)
+        layout.addWidget(self.monitor_button, 3, 2)
+        layout.addWidget(self.trigger_button, 4, 2)
+        layout.addWidget(self.continuous_button, 5, 2)
+
+        layout.setColumnStretch(3, 1)
+        layout.addWidget(self.save_button, 1, 3)
+        layout.addWidget(self.save_location, 2, 3)
 
         self.setLayout(layout)
 
