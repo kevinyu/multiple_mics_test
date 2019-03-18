@@ -176,15 +176,6 @@ class MainWindow(widgets.QMainWindow):
         self.saver.reset()
         self.detector.reset()
 
-        '''
-        for spec_plot in self.recording_window.spec_plots.values():
-            self._old_threads.append(spec_plot._worker._thread)
-        self.layout.removeWidget(self.recording_window)
-        self.recording_window.deleteLater()
-        self.recording_window = RecordingWindow(self.channels, self)
-        self.layout.addWidget(self.recording_window)
-        '''
-
         self.recording_window.set_channels(channels)
 
         for ch_idx in range(channels):
