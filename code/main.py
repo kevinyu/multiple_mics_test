@@ -106,10 +106,15 @@ class MainWindow(widgets.QMainWindow):
         self._old_threads = []
 
         self.mic = None
+        self.bird_name = None
 
         self.init_ui()
         self.setup_listeners()
         self.connect_events()
+
+        self.program_controller.save_location.setText(
+            "[No path]/{0}".format(self.saver.filename_format)
+        )
 
         self._get_selected_mic(None)
         self.on_select_channels(0)
@@ -206,21 +211,53 @@ class MainWindow(widgets.QMainWindow):
             partial(self.on_recording_mode, "continuous")
         )
         self.program_controller.save_button.clicked.connect(self.run_file_loader)
+        self.program_controller.name_button.clicked.connect(self.run_bird_namer)
 
         self.program_controller.input_source.currentIndexChanged.connect(self._get_selected_mic)
         self.program_controller.input_source_channels.currentIndexChanged.connect(self.on_select_channels)
+
+    def update_display_path(self):
+        path = self.saver.path
+        if path is not None:
+            display_path = str(os.path.join(
+                "/",
+                "[...]",
+                os.path.basename(os.path.dirname(path)),
+                os.path.basename(path),
+                self.saver.filename_format
+            ))
+        else:
+            display_path = os.path.join("[No path]", self.saver.filename_format)
+
+        self.program_controller.save_location.setText(display_path)
+
+    def run_bird_namer(self):
+        value, okay = widgets.QInputDialog.getText(
+                self,
+                "Set Bird Name",
+                "Bird Name",
+                widgets.QLineEdit.Normal,
+                self.bird_name)
+        if okay:
+            self.bird_name = value or None
+
+        if self.bird_name:
+            self.saver.filename_format = "{}{{0}}.wav".format(self.bird_name)
+        else:
+            self.saver.filename_format = "recording{0}.wav"
+        
+        self.update_display_path()
 
     def run_file_loader(self):
         options = widgets.QFileDialog.Options()
         path = widgets.QFileDialog.getExistingDirectory(
             self,
             "Save recordings to",
-            Settings.BASE_DIRECTORY,
+            self.saver.path or Settings.BASE_DIRECTORY,
             options=options)
-
-        self.saver.path = path
-        display_path = str(os.path.join("/", "[...]", os.path.basename(os.path.dirname(path)), os.path.basename(path)))
-        self.program_controller.save_location.setText(display_path)
+        if path:
+            self.saver.path = path
+            self.update_display_path()
 
 
 class ProgramController(widgets.QFrame):
@@ -234,7 +271,8 @@ class ProgramController(widgets.QFrame):
         self.input_source = widgets.QComboBox(self)
         self.input_source_channels = widgets.QComboBox(self)
         self.save_button = widgets.QPushButton("Set save location", self)
-        self.save_location = widgets.QLabel("(No path)", self)
+        self.name_button = widgets.QPushButton("Set bird name", self)
+        self.save_location = widgets.QLabel("[No path]", self)
 
         self.monitor_button = widgets.QRadioButton("Monitor only")
         self.monitor_button.setChecked(True)
@@ -266,7 +304,8 @@ class ProgramController(widgets.QFrame):
 
         layout.setColumnStretch(3, 1)
         layout.addWidget(self.save_button, 1, 3)
-        layout.addWidget(self.save_location, 2, 3)
+        layout.addWidget(self.name_button, 2, 3)
+        layout.addWidget(self.save_location, 3, 3)
 
         self.setLayout(layout)
 

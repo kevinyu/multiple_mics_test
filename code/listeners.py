@@ -89,7 +89,7 @@ class SoundSaver(MicrophoneListener):
             path,
             triggered=False,
             saving=False,
-            filename_format="recording{}.wav",
+            filename_format="recording{0}.wav",
             min_size=None,
             sampling_rate=44100,
             parent=None
