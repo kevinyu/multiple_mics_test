@@ -7,14 +7,14 @@ class Settings(object):
     BASE_DIRECTORY = None
     SAVE_DIRECTORY = None
     SAVE_CONTINUOUSLY = False
-    FILE_DURATION = 10      # seconds
-    MIN_FILE_DURATION = 1.5   # seconds
+    FILE_DURATION = 30      # seconds
+    MIN_FILE_DURATION = 1.2   # seconds
 
     DETECTION_WINDOW = 0.1  # seconds
     DETECTION_BUFFER = 0.5  # seconds
     MIN_POWER_THRESHOLD = 50
     DEFAULT_POWER_THRESHOLD = 175
-    MAX_POWER_THRESHOLD = 850
+    MAX_POWER_THRESHOLD = 1000
     DETECTION_CROSSINGS_PER_CHUNK = 20
 
     PLOT_DURATION = 5.0

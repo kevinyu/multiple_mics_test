@@ -114,11 +114,13 @@ class SoundDeviceMicrophone(BaseMicrophone):
 
     def _run(self):
         def _callback(in_data, frame_count, time_info, status):
-            self.REC.emit(np.power(10.0, Settings.GAIN / 20.0) * in_data)
+            scaled = np.power(10.0, Settings.GAIN / 20.0) * in_data
+            self.REC.emit(scaled.astype(np.int16))
             return
 
         try:
             self._stream = sd.InputStream(
+                    dtype=np.int16,
                     samplerate=Settings.RATE,
                     blocksize=Settings.CHUNK,
                     device=self.device_index,

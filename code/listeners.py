@@ -208,4 +208,4 @@ class SoundSaver(MicrophoneListener):
             path = os.path.join(self.path, filename)
 
         print("\nSaving file to {}\n".format(path))
-        scipy.io.wavfile.write(path, self.sampling_rate, data)
+        scipy.io.wavfile.write(path, self.sampling_rate, data.astype(np.int16))
