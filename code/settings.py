@@ -2,11 +2,13 @@ class Settings(object):
     CHUNK = 512
     RATE = 44100
 
+    GAIN = 0
+
     BASE_DIRECTORY = None
     SAVE_DIRECTORY = None
     SAVE_CONTINUOUSLY = False
     FILE_DURATION = 10      # seconds
-    MIN_FILE_DURATION = 1   # seconds
+    MIN_FILE_DURATION = 1.5   # seconds
 
     DETECTION_WINDOW = 0.1  # seconds
     DETECTION_BUFFER = 0.5  # seconds

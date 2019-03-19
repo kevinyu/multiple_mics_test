@@ -10,6 +10,9 @@ from functools import partial
 import numpy as np
 import pyaudio
 import scipy.io.wavfile
+import sounddevice
+
+import sounddevice as sd
 
 
 import numpy as np
@@ -26,16 +29,43 @@ from listeners import SoundDetector, SoundSaver, MicrophoneListener
 from settings import Settings
 
 
+class BaseMicrophone(QObject):
+    def __init__(self, device_index=None, channels=1, parent=None):
+        super(BaseMicrophone, self).__init__(parent)
+        self.channels = channels
+        self.device_index = device_index
 
-class Microphone(QObject):
+    def _run(self):
+        raise NotImplementedError
+
+    def run(self):
+        self._thread = QThread(self)
+        self.moveToThread(self._thread)
+        self._thread.start()
+        self._run()
+
+        # self.STOP.connect(self.stop)
+
+    def set_channels(self, channels=1):
+        if self._stream:
+            self._stream.close()
+        self.channels = channels
+        self._run()
+
+    def set_device_index(self, device_index=0):
+        if self._stream:
+            self._stream.close()
+        self.device_index = device_index
+        self._run()
+
+
+class PyAudioMicrophone(BaseMicrophone):
 
     REC = pyqtSignal(object)
     STOP = pyqtSignal()
 
     def __init__(self, device_index=None, channels=1, parent=None):
-        super(Microphone, self).__init__(parent)
-        self.channels = channels
-        self.device_index = device_index
+        super(PyAudioMicrophone, self).__init__(device_index=device_index, channels=channels, parent=parent)
         self._stream = None
         self.p = pyaudio.PyAudio()
         self._stop = False
@@ -69,13 +99,41 @@ class Microphone(QObject):
         except:
             return
 
+
+class SoundDeviceMicrophone(BaseMicrophone):
+
+    REC = pyqtSignal(object)
+    STOP = pyqtSignal()
+
+    def __init__(self, device_index=None, channels=1, parent=None):
+        super(SoundDeviceMicrophone, self).__init__(device_index=device_index, channels=channels, parent=parent)
+        self._stream = None
+        self.p = pyaudio.PyAudio()
+        self._stop = False
+        self._gain = Settings.GAIN
+
+    def _run(self):
+        def _callback(in_data, frame_count, time_info, status):
+            self.REC.emit(np.power(10.0, Settings.GAIN / 20.0) * in_data)
+            return
+
+        try:
+            self._stream = sd.InputStream(
+                    samplerate=Settings.RATE,
+                    blocksize=Settings.CHUNK,
+                    device=self.device_index,
+                    channels=self.channels,
+                    callback=_callback)
+        except:
+            pass
+        else:
+            self._stream.start()
+
     def run(self):
         self._thread = QThread(self)
         self.moveToThread(self._thread)
         self._thread.start()
         self._run()
-
-        # self.STOP.connect(self.stop)
 
     def set_channels(self, channels=1):
         if self._stream:
@@ -90,12 +148,14 @@ class Microphone(QObject):
         self._run()
 
 
+
+
 class MainWindow(widgets.QMainWindow):
 
     def __init__(self):
         super(MainWindow, self).__init__()
         self.title = "Recorder"
-        self.channels = 0
+        self.channels = 1
 
         self.program_controller = ProgramController(self)
 
@@ -117,7 +177,7 @@ class MainWindow(widgets.QMainWindow):
         )
 
         self._get_selected_mic(None)
-        self.on_select_channels(0)
+        self.set_channels(self.channels)
         self.connect_mic()
 
     def init_ui(self):
@@ -162,7 +222,7 @@ class MainWindow(widgets.QMainWindow):
         self.channels = 1
         self.on_recording_mode("monitor")
         if not self.mic:
-            self.mic = Microphone(device_index=device_index, channels=self.channels)
+            self.mic = SoundDeviceMicrophone(device_index=device_index, channels=self.channels)
         else:
             self.mic.set_device_index(device_index)
 
@@ -171,11 +231,13 @@ class MainWindow(widgets.QMainWindow):
         self.mic.REC.connect(self.saver.receive_data)
         self.mic.REC.connect(self.detector.IN.emit)
 
-    def on_select_channels(self, channels):
+    def on_select_channels(self, idx):
+        self.set_channels(idx + 1)
+
+    def set_channels(self, channels):
         if self.mic is None:
             return
 
-        self.channels = channels
         self.mic.set_channels(channels)
 
         self.saver.reset()
@@ -280,11 +342,19 @@ class ProgramController(widgets.QFrame):
                 "Triggered recording")
         self.continuous_button = widgets.QRadioButton("Continuous recording")
 
+        for i, device in enumerate(sd.query_devices()):
+            if not device["max_input_channels"]:
+                continue
+            device["index"] = i
+            self.input_source.addItem(device.get("name"), device)
+
+        '''
         for i in range(self.p.get_device_count()):
             device = self.p.get_device_info_by_index(i)
             if not device.get("maxInputChannels"):
                 continue
             self.input_source.addItem(device.get("name"), device)
+        '''
         self.input_source.currentIndexChanged.connect(self.update_channel_dropdown)
         self.update_channel_dropdown(None)
 
@@ -312,8 +382,8 @@ class ProgramController(widgets.QFrame):
     def update_channel_dropdown(self, idx):
         device = self.input_source.currentData()
         self.input_source_channels.clear()
-        for i in range(device.get("maxInputChannels")):
-            self.input_source_channels.addItem(str(i), i)
+        for i in range(device.get("max_input_channels")):
+            self.input_source_channels.addItem(str(i + 1), i + 1)
 
 
 class RecordingController(widgets.QFrame):
@@ -327,6 +397,18 @@ class RecordingController(widgets.QFrame):
         i.e. gain and threshold
         """
         super(RecordingController, self).__init__(parent)
+        # self.gain_control = widgets.QDoubleSpinBox(self)
+        self.gain_title = widgets.QLabel("Gain", self)
+        self.gain_label = widgets.QLabel("0", self)
+        self.gain_control = widgets.QSlider(Qt.Vertical, self)
+        self.gain_control.setTickPosition(widgets.QSlider.TicksBothSides)
+        self.gain_control.setMinimum(-20)
+        self.gain_control.setMaximum(20)
+        self.gain_control.setValue(0)
+        self.gain_control.setTickInterval(2)
+        self.gain_control.setSingleStep(1)
+
+        self.threshold_title = widgets.QLabel("Threshold", self)
         self.threshold_label = widgets.QLabel(str(Settings.DEFAULT_POWER_THRESHOLD), self)
         self.slider = widgets.QSlider(Qt.Vertical, self)
         self.slider.setTickPosition(widgets.QSlider.TicksBothSides)
@@ -335,12 +417,23 @@ class RecordingController(widgets.QFrame):
         self.slider.setValue(Settings.DEFAULT_POWER_THRESHOLD)
         self.slider.setTickInterval(200)
         self.slider.setSingleStep(50)
+
+        self.gain_control.valueChanged.connect(self.on_gain_change)
         self.slider.valueChanged.connect(self.on_threshold_change)
 
-        layout = widgets.QVBoxLayout()
-        layout.addWidget(self.threshold_label)
-        layout.addWidget(self.slider)
+        layout = widgets.QGridLayout()
+        layout.addWidget(self.gain_title, 1, 1)
+        layout.addWidget(self.gain_label, 2, 1)
+        layout.addWidget(self.gain_control, 3, 1)
+        layout.addWidget(self.threshold_title, 1, 2)
+        layout.addWidget(self.threshold_label, 2, 2)
+        layout.addWidget(self.slider, 3, 2)
         self.setLayout(layout)
+
+    def on_gain_change(self, value):
+        """TODO: make this gain per channel"""
+        Settings.GAIN = value
+        self.gain_label.setText(str(value))
 
     def on_threshold_change(self, value):
         self.SET_THRESHOLD.emit(value)
@@ -411,10 +504,11 @@ class RecordingWindow(widgets.QFrame):
             self.controllers[ch_idx], 2 * ch_idx + 1, 1, 2, 1)
 
     def init_ui(self):
+        self.layout = widgets.QGridLayout()
+
         for ch_idx in range(self.channels):
             self.init_channel(ch_idx)
 
-        self.layout = widgets.QGridLayout()
         self.setLayout(self.layout)
 
     def _loop(self):

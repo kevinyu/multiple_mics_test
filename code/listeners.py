@@ -54,6 +54,7 @@ class SoundDetector(MicrophoneListener):
     def receive_data(self, data):
         if self._channels is None:
             self._channels = data.shape[1]
+
         if data.shape[1] != self._channels:
             return
 

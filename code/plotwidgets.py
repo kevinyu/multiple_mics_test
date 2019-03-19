@@ -159,6 +159,7 @@ class WaveformWidget(pg.PlotWidget):
     def receive_data(self, chunk):
         self._buffer.append(np.max(np.power(np.abs(chunk), 2)))
         # self._buffer.extend(np.power(np.abs(chunk), 2))
+        # self._buffer.append(np.max(np.abs(chunk[0])))
 
     def draw(self):
         self.curve.setData(np.array(self._buffer))
