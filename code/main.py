@@ -404,7 +404,7 @@ class RecordingController(widgets.QFrame):
         self.gain_label = widgets.QLabel("0", self)
         self.gain_control = widgets.QSlider(Qt.Vertical, self)
         self.gain_control.setTickPosition(widgets.QSlider.TicksBothSides)
-        self.gain_control.setMinimum(-20)
+        self.gain_control.setMinimum(-10)
         self.gain_control.setMaximum(20)
         self.gain_control.setValue(0)
         self.gain_control.setTickInterval(2)
@@ -417,7 +417,7 @@ class RecordingController(widgets.QFrame):
         self.slider.setMinimum(Settings.MIN_POWER_THRESHOLD)
         self.slider.setMaximum(Settings.MAX_POWER_THRESHOLD)
         self.slider.setValue(Settings.DEFAULT_POWER_THRESHOLD)
-        self.slider.setTickInterval(200)
+        self.slider.setTickInterval(1000)
         self.slider.setSingleStep(50)
 
         self.gain_control.valueChanged.connect(self.on_gain_change)
@@ -484,7 +484,7 @@ class RecordingWindow(widgets.QFrame):
         self.spec_plots[ch_idx] = SpectrogramWidget(
             Settings.CHUNK,
             min_freq=500,
-            max_freq=12000,
+            max_freq=8000,
             window=Settings.PLOT_DURATION,
             show_x=False, #True if ch_idx == self.channels - 1 else False,
             cmap=None
