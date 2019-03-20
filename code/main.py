@@ -409,6 +409,7 @@ class RecordingController(widgets.QFrame):
         self.gain_control.setValue(0)
         self.gain_control.setTickInterval(2)
         self.gain_control.setSingleStep(1)
+        self.gain_control.setPageStep(2)
 
         self.threshold_title = widgets.QLabel("Threshold", self)
         self.threshold_label = widgets.QLabel(str(Settings.DEFAULT_POWER_THRESHOLD), self)
@@ -419,6 +420,7 @@ class RecordingController(widgets.QFrame):
         self.slider.setValue(Settings.DEFAULT_POWER_THRESHOLD)
         self.slider.setTickInterval(1000)
         self.slider.setSingleStep(50)
+        self.slider.setPageStep(500)
 
         self.gain_control.valueChanged.connect(self.on_gain_change)
         self.slider.valueChanged.connect(self.on_threshold_change)
