@@ -168,15 +168,13 @@ class MainWindow(widgets.QMainWindow):
         self._old_threads = []
 
         self.mic = None
-        self.bird_name = None
+        self.bird_name = Settings.get("BIRD_NAME")
 
         self.init_ui()
         self.setup_listeners()
+        self.update_filename_format()
+        self.update_display_path()
         self.connect_events()
-
-        self.program_controller.save_location.setText(
-            "[No path]/{0}".format(self.saver.filename_format)
-        )
 
         self._get_selected_mic(None)
         self.set_channels(self.channels)
@@ -201,10 +199,12 @@ class MainWindow(widgets.QMainWindow):
     def setup_listeners(self):
         """Instaniate listeners
         """
+
         self.saver = SoundSaver(
             size=Settings.RATE * Settings.FILE_DURATION,
             min_size=Settings.RATE * Settings.MIN_FILE_DURATION,
-            path=Settings.SAVE_DIRECTORY,
+            filename_format=self._filename_format,
+            path=Settings.get("SAVE_DIRECTORY"),
             triggered=False
         )
         self.saver.start()
@@ -308,11 +308,20 @@ class MainWindow(widgets.QMainWindow):
             self.bird_name = value or None
 
         if self.bird_name:
-            self.saver.filename_format = "{}_{{0}}.wav".format(self.bird_name)
-        else:
-            self.saver.filename_format = "recording_{0}.wav"
-        
+            Settings.set("BIRD_NAME", self.bird_name)
+
+        self.update_filename_format()
         self.update_display_path()
+
+    @property
+    def _filename_format(self):
+        if self.bird_name:
+            return "{}_{{0}}.wav".format(self.bird_name)
+        else:
+            return "recording_{0}.wav"
+
+    def update_filename_format(self):
+        self.saver.filename_format = self._filename_format
 
     def run_file_loader(self):
         options = widgets.QFileDialog.Options()
@@ -322,6 +331,7 @@ class MainWindow(widgets.QMainWindow):
             self.saver.path or Settings.BASE_DIRECTORY,
             options=options)
         if path:
+            Settings.set("SAVE_DIRECTORY", path)
             self.saver.path = path
             self.update_display_path()
 

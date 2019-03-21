@@ -1,3 +1,9 @@
+from PyQt5.QtCore import QSettings
+
+
+qsettings = QSettings("Theunissen Lab", "TLabRecorder")
+
+
 class Settings(object):
     CHUNK = 512
     RATE = 44100
@@ -19,3 +25,15 @@ class Settings(object):
     DETECTION_CROSSINGS_PER_CHUNK = 20
 
     PLOT_DURATION = 5.0
+
+    @classmethod
+    def get(cls, key):
+        return qsettings.value(key, getattr(cls, key, None))
+
+    @classmethod
+    def set(cls, key, val):
+        qsettings.setValue(key, val)
+        qsettings.sync()
+        setattr(cls, key, val)
+        
+
