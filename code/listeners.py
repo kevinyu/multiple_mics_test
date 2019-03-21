@@ -1,4 +1,5 @@
 import collections
+import datetime
 import logging
 import time
 
@@ -9,6 +10,7 @@ import numpy as np
 from PyQt5.QtCore import pyqtSignal, pyqtSlot, QThread, QObject, QTimer
 
 from settings import Settings
+from utils import datetime2str
 import itertools
 
 logger = logging.getLogger(__name__)
@@ -75,14 +77,14 @@ class SoundDetector(MicrophoneListener):
             ratio = int(threshold_crossings.size) / Settings.DETECTION_CROSSINGS_PER_CHUNK
 
             if ratio > 1:
-                print("ON    ", end="\r")
                 self.OUT.emit()
                 break
-        else:
-            print("OFF   ", end="\r")
 
 
 class SoundSaver(MicrophoneListener):
+
+    SAVE_EVENT = pyqtSignal(str)
+    RECORDING = pyqtSignal(bool)
 
     def __init__(
             self,
@@ -122,6 +124,8 @@ class SoundSaver(MicrophoneListener):
         if self._trigger_timer:
             self._trigger_timer.stop()
             self._trigger_timer.deleteLater()
+        else:
+            self.RECORDING.emit(True)
 
         self._trigger_timer = QTimer(self)
         self._trigger_timer.timeout.connect(self.stop_rec)
@@ -136,7 +140,9 @@ class SoundSaver(MicrophoneListener):
         self._channels = None
 
     def stop_rec(self):
+        self.RECORDING.emit(False)
         self._recording = False
+        self._trigger_timer = None
 
     @pyqtSlot()
     def trigger(self):
@@ -178,6 +184,7 @@ class SoundSaver(MicrophoneListener):
                 self._save(data[:self.size])
                 self._buffer.clear()
                 self._buffer.extend(data[self.size:])
+
         if self.triggered:
             if self._recording:
                 if not len(self._save_buffer):
@@ -207,12 +214,19 @@ class SoundSaver(MicrophoneListener):
             print("Warning: {} does not exist".format(self.path))
             return
 
-        filename = self.filename_format.format(self._file_idx)
-        path = os.path.join(self.path, filename)
-        while os.path.exists(path):
-            self._file_idx += 1
+        if Settings.FILENAME_SUFFIX == "time":
+            start_time = datetime.datetime.now() - datetime.timedelta(seconds=len(data) / Settings.RATE)
+            time_str = datetime2str(start_time)
+            filename = self.filename_format.format(time_str)
+            path = os.path.join(self.path, filename)
+        else:
             filename = self.filename_format.format(self._file_idx)
             path = os.path.join(self.path, filename)
+            while os.path.exists(path):
+                self._file_idx += 1
+                filename = self.filename_format.format(self._file_idx)
+                path = os.path.join(self.path, filename)
 
         print("\nSaving file to {}\n".format(path))
+        self.SAVE_EVENT.emit(path)
         scipy.io.wavfile.write(path, self.sampling_rate, data.astype(np.int16))

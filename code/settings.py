@@ -10,7 +10,10 @@ class Settings(object):
 
     GAIN = 0
 
+    USE_SOUNDDEVICE = True
+
     BASE_DIRECTORY = None
+    FILENAME_SUFFIX = "time"
     SAVE_DIRECTORY = None
     SAVE_CONTINUOUSLY = False
     FILE_DURATION = 30      # seconds

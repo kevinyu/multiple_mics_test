@@ -30,6 +30,10 @@ from settings import Settings
 
 
 class BaseMicrophone(QObject):
+
+    REC = pyqtSignal(object)
+    STOP = pyqtSignal()
+
     def __init__(self, device_index=None, channels=1, parent=None):
         super(BaseMicrophone, self).__init__(parent)
         self.channels = channels
@@ -43,8 +47,6 @@ class BaseMicrophone(QObject):
         self.moveToThread(self._thread)
         self._thread.start()
         self._run()
-
-        # self.STOP.connect(self.stop)
 
     def set_channels(self, channels=1):
         if self._stream:
@@ -61,14 +63,12 @@ class BaseMicrophone(QObject):
 
 class PyAudioMicrophone(BaseMicrophone):
 
-    REC = pyqtSignal(object)
-    STOP = pyqtSignal()
-
     def __init__(self, device_index=None, channels=1, parent=None):
         super(PyAudioMicrophone, self).__init__(device_index=device_index, channels=channels, parent=parent)
         self._stream = None
         self.p = pyaudio.PyAudio()
         self._stop = False
+        self._gain = Settings.GAIN
 
     def _run(self):
         def _callback(in_data, frame_count, time_info, status):
@@ -80,8 +80,9 @@ class PyAudioMicrophone(BaseMicrophone):
                 data[idx::self.channels]
                 for idx in range(self.channels)
             ]).T
+            scaled = np.power(10.0, Settings.GAIN / 20.0) * new_data
 
-            self.REC.emit(new_data)
+            self.REC.emit(scaled)
 
             return (in_data, pyaudio.paContinue)
 
@@ -102,13 +103,9 @@ class PyAudioMicrophone(BaseMicrophone):
 
 class SoundDeviceMicrophone(BaseMicrophone):
 
-    REC = pyqtSignal(object)
-    STOP = pyqtSignal()
-
     def __init__(self, device_index=None, channels=1, parent=None):
         super(SoundDeviceMicrophone, self).__init__(device_index=device_index, channels=channels, parent=parent)
         self._stream = None
-        self.p = pyaudio.PyAudio()
         self._stop = False
         self._gain = Settings.GAIN
 
@@ -130,26 +127,6 @@ class SoundDeviceMicrophone(BaseMicrophone):
             pass
         else:
             self._stream.start()
-
-    def run(self):
-        self._thread = QThread(self)
-        self.moveToThread(self._thread)
-        self._thread.start()
-        self._run()
-
-    def set_channels(self, channels=1):
-        if self._stream:
-            self._stream.close()
-        self.channels = channels
-        self._run()
-
-    def set_device_index(self, device_index=0):
-        if self._stream:
-            self._stream.close()
-        self.device_index = device_index
-        self._run()
-
-
 
 
 class MainWindow(widgets.QMainWindow):
@@ -184,14 +161,17 @@ class MainWindow(widgets.QMainWindow):
         main_frame = widgets.QFrame(self)
         self.layout = widgets.QVBoxLayout()
 
+        self.recording_indicator = widgets.QLabel("Trigger OFF", self)
+
         self.scroll_area = widgets.QScrollArea(self)
-        self.scroll_area.setFixedHeight(650)
-        self.scroll_area.setFixedWidth(800)
+        # self.scroll_area.setFixedHeight(650)
+        # self.scroll_area.setFixedWidth(800)
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setWidget(self.recording_window)
 
         self.layout.addWidget(self.program_controller)
         self.layout.addWidget(self.scroll_area)
+        self.layout.addWidget(self.recording_indicator)
         main_frame.setLayout(self.layout)
 
         self.setCentralWidget(main_frame)
@@ -209,12 +189,24 @@ class MainWindow(widgets.QMainWindow):
         )
         self.saver.start()
 
+        self.saver.SAVE_EVENT.connect(self.update_last_save)
+        self.saver.RECORDING.connect(self.update_recording_indicator)
+
         self.detector = SoundDetector(
             size=int(Settings.RATE * Settings.DETECTION_WINDOW)
         )
         self.detector.start()
 
         self.detector.OUT.connect(self.saver.trigger)
+
+    def update_last_save(self, path):
+        self.program_controller.last_save.setText("Last saved {}".format(os.path.basename(path)))
+
+    def update_recording_indicator(self, val):
+        if val:
+            self.recording_indicator.setText("Trigger ON")
+        else:
+            self.recording_indicator.setText("Trigger OFF")
 
     def _get_selected_mic(self, idx):
         device = self.program_controller.input_source.currentData()
@@ -223,6 +215,7 @@ class MainWindow(widgets.QMainWindow):
     def on_select_mic(self, device_index):
         self.channels = 1
         self.on_recording_mode("monitor")
+        self.program_controller.monitor_button.setChecked(True)
         if not self.mic:
             self.mic = SoundDeviceMicrophone(device_index=device_index, channels=self.channels)
         else:
@@ -241,6 +234,8 @@ class MainWindow(widgets.QMainWindow):
             return
 
         self.mic.set_channels(channels)
+        self.on_recording_mode("monitor")
+        self.program_controller.monitor_button.setChecked(True)
 
         self.saver.reset()
         self.detector.reset()
@@ -259,12 +254,15 @@ class MainWindow(widgets.QMainWindow):
         if mode == "monitor":
             self.saver.set_triggered(False)
             self.saver.set_saving(False)
+            self.program_controller.last_save.setText("Monitoring...")
         elif mode == "triggered":
             self.saver.set_triggered(True)
             self.saver.set_saving(True)
+            self.program_controller.last_save.setText("Recording on trigger...")
         elif mode == "continuous":
             self.saver.set_triggered(False)
             self.saver.set_saving(True)
+            self.program_controller.last_save.setText("Recording...")
 
     def connect_events(self):
         self.program_controller.monitor_button.clicked.connect(
@@ -295,7 +293,7 @@ class MainWindow(widgets.QMainWindow):
         else:
             display_path = os.path.join("[No path]", self.saver.filename_format)
 
-        self.program_controller.save_location.setText(display_path)
+        self.program_controller.save_location.setText("Saving to {}".format(display_path))
 
     def run_bird_namer(self):
         value, okay = widgets.QInputDialog.getText(
@@ -349,6 +347,7 @@ class ProgramController(widgets.QFrame):
         self.save_button = widgets.QPushButton("Set save location", self)
         self.name_button = widgets.QPushButton("Set bird name", self)
         self.save_location = widgets.QLabel("[No path]", self)
+        self.last_save = widgets.QLabel("", self)
 
         self.monitor_button = widgets.QRadioButton("Monitor only")
         self.monitor_button.setChecked(True)
@@ -356,19 +355,19 @@ class ProgramController(widgets.QFrame):
                 "Triggered recording")
         self.continuous_button = widgets.QRadioButton("Continuous recording")
 
-        for i, device in enumerate(sd.query_devices()):
-            if not device["max_input_channels"]:
-                continue
-            device["index"] = i
-            self.input_source.addItem(device.get("name"), device)
+        if Settings.USE_SOUNDDEVICE:
+            for i, device in enumerate(sd.query_devices()):
+                if not device["max_input_channels"]:
+                    continue
+                device["index"] = i
+                self.input_source.addItem(device.get("name"), device)
+        else:
+            for i in range(self.p.get_device_count()):
+                device = self.p.get_device_info_by_index(i)
+                if not device.get("maxInputChannels"):
+                    continue
+                self.input_source.addItem(device.get("name"), device)
 
-        '''
-        for i in range(self.p.get_device_count()):
-            device = self.p.get_device_info_by_index(i)
-            if not device.get("maxInputChannels"):
-                continue
-            self.input_source.addItem(device.get("name"), device)
-        '''
         self.input_source.currentIndexChanged.connect(self.update_channel_dropdown)
         self.update_channel_dropdown(None)
 
@@ -387,16 +386,24 @@ class ProgramController(widgets.QFrame):
         layout.addWidget(self.continuous_button, 5, 2)
 
         layout.setColumnStretch(3, 1)
+        layout.setColumnStretch(4, 1)
         layout.addWidget(self.save_button, 1, 3)
-        layout.addWidget(self.name_button, 2, 3)
-        layout.addWidget(self.save_location, 3, 3)
+        layout.addWidget(self.name_button, 1, 4)
+        layout.addWidget(self.save_location, 2, 3, 1, 2)
+        layout.addWidget(self.last_save, 3, 3, 1, 2)
 
         self.setLayout(layout)
 
     def update_channel_dropdown(self, idx):
         device = self.input_source.currentData()
         self.input_source_channels.clear()
-        for i in range(device.get("max_input_channels")):
+        
+        if Settings.USE_SOUNDDEVICE:
+            max_channels = device.get("max_input_channels")
+        else:
+            max_channels = device.get("maxInputChannels")
+
+        for i in range(max_channels):
             self.input_source_channels.addItem(str(i + 1), i + 1)
 
 
