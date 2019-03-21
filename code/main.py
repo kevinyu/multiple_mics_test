@@ -1,31 +1,16 @@
 from __future__ import print_function
 import os
 import sys
-import time
-import collections
-import threading
-from queue import Queue
 from functools import partial
 
 import numpy as np
 import pyaudio
-import scipy.io.wavfile
-import sounddevice
-
 import sounddevice as sd
-
-
-import numpy as np
-import pyqtgraph as pg
-from PyQt5 import QtGui as gui
 from PyQt5 import QtWidgets as widgets
-from PyQt5.QtCore import QTimer, pyqtSignal, QObject, QThread, pyqtSlot, QSettings, Qt
+from PyQt5.QtCore import QTimer, pyqtSignal, QObject, QThread, pyqtSlot, Qt
 
-
-
+from listeners import SoundDetector, SoundSaver
 from plotwidgets import SpectrogramWidget, WaveformWidget
-from listeners import SoundDetector, SoundSaver, MicrophoneListener
-
 from settings import Settings
 
 

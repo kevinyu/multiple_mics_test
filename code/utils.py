@@ -1,6 +1,3 @@
-import datetime
-
-
 def datetime2str(dt):
     s = (
         dt.hour * (1000 * 60 * 60) +

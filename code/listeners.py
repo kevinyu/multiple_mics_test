@@ -1,7 +1,6 @@
 import collections
 import datetime
 import logging
-import time
 
 import os
 import scipy.io.wavfile
@@ -11,7 +10,7 @@ from PyQt5.QtCore import pyqtSignal, pyqtSlot, QThread, QObject, QTimer
 
 from settings import Settings
 from utils import datetime2str
-import itertools
+
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)

@@ -3,7 +3,7 @@ import collections
 import pyqtgraph as pg
 import numpy as np
 
-from PyQt5.QtCore import QTimer, pyqtSignal, QObject, QThread, pyqtSlot
+from PyQt5.QtCore import pyqtSignal, QObject, QThread, pyqtSlot
 
 from settings import Settings
 
@@ -95,8 +95,8 @@ class SpectrogramWidget(pg.PlotWidget):
     def get_cmap(self):
         pos = np.array([0.1, 0.7])
         color = np.array([
-            (0,0,0,255),
-            (255,255,255, 255)
+            (0, 0 , 0, 255),
+            (255, 255, 255, 255)
         ], dtype=np.ubyte)
         cmap = pg.ColorMap(pos, color)
 
