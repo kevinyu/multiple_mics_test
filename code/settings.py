@@ -8,10 +8,11 @@ class Settings(object):
     SAVE_DIRECTORY = None
     SAVE_CONTINUOUSLY = False
     FILE_DURATION = 30      # seconds
-    MIN_FILE_DURATION = 1.2   # seconds
+    MIN_FILE_DURATION = 1.0   # seconds
+    MAX_TRIGGERED_DURATION = 20   # seconds
 
     DETECTION_WINDOW = 0.1  # seconds
-    DETECTION_BUFFER = 0.5  # seconds
+    DETECTION_BUFFER = 0.3  # seconds
     MIN_POWER_THRESHOLD = 10
     DEFAULT_POWER_THRESHOLD = 1000
     MAX_POWER_THRESHOLD = 10000

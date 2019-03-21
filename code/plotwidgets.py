@@ -22,6 +22,7 @@ class FFTThread(QObject):
         # normalized, windowed frequencies in data chunk
         spec = np.fft.rfft(chunk * self.win) / self.chunk_size
         psd = abs(spec) ** 2           # magnitude
+        psd += 1e-5                    # Add fake noise floor
         psd = 20 * np.log10(psd)       # to dB scale
         self.OUT.emit(psd)
 

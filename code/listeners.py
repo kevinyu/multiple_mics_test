@@ -144,6 +144,13 @@ class SoundSaver(MicrophoneListener):
 
     def set_triggered(self, triggered):
         self.triggered = triggered
+        self._buffer.clear()
+        if self.triggered:
+            self._buffer = collections.deque(
+                maxlen=int(Settings.DETECTION_BUFFER * Settings.RATE)
+            )
+        else:
+            self._buffer = collections.deque()
 
     def set_saving(self, saving):
         self.saving = saving
@@ -174,14 +181,14 @@ class SoundSaver(MicrophoneListener):
         if self.triggered:
             if self._recording:
                 if not len(self._save_buffer):
-                    pre = itertools.islice(
-                        self._buffer,
-                        max(len(self._buffer) - int(Settings.DETECTION_BUFFER * Settings.RATE), 0),
-                        None
-                    )
-                    self._save_buffer.extend(pre)
+                    self._save_buffer.extend(self._buffer)
                 else:
                     self._save_buffer.extend(data)
+
+                if (len(self._save_buffer) / Settings.RATE) >= Settings.MAX_TRIGGERED_DURATION:
+                    data = np.array(self._save_buffer)
+                    self._save(data)
+                    self._save_buffer.clear()
             else:
                 data_to_save = np.array(self._save_buffer)
                 if not self.min_size or len(data_to_save) > self.min_size:

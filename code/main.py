@@ -244,6 +244,8 @@ class MainWindow(widgets.QMainWindow):
 
         self.saver.reset()
         self.detector.reset()
+        self.detector._channels = channels
+        self.saver._channels = channels
 
         self.recording_window.set_channels(channels)
 
@@ -284,7 +286,7 @@ class MainWindow(widgets.QMainWindow):
         path = self.saver.path
         if path is not None:
             display_path = str(os.path.join(
-                "/",
+                os.sep,
                 "[...]",
                 os.path.basename(os.path.dirname(path)),
                 os.path.basename(path),
@@ -306,9 +308,9 @@ class MainWindow(widgets.QMainWindow):
             self.bird_name = value or None
 
         if self.bird_name:
-            self.saver.filename_format = "{}{{0}}.wav".format(self.bird_name)
+            self.saver.filename_format = "{}_{{0}}.wav".format(self.bird_name)
         else:
-            self.saver.filename_format = "recording{0}.wav"
+            self.saver.filename_format = "recording_{0}.wav"
         
         self.update_display_path()
 
