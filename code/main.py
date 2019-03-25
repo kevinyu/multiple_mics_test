@@ -1,6 +1,7 @@
 from __future__ import print_function
 import os
 import sys
+from collections import defaultdict
 from functools import partial
 
 import numpy as np
@@ -65,7 +66,7 @@ class PyAudioMicrophone(BaseMicrophone):
                 data[idx::self.channels]
                 for idx in range(self.channels)
             ]).T
-            scaled = np.power(10.0, Settings.GAIN / 20.0) * new_data
+            scaled = np.power(10.0, Settings.GAIN[:self.channels] / 20.0) * new_data
 
             self.REC.emit(scaled)
 
@@ -96,7 +97,7 @@ class SoundDeviceMicrophone(BaseMicrophone):
 
     def _run(self):
         def _callback(in_data, frame_count, time_info, status):
-            scaled = np.power(10.0, Settings.GAIN / 20.0) * in_data
+            scaled = np.power(10.0, Settings.GAIN[:self.channels] / 20.0) * in_data
             self.REC.emit(scaled.astype(np.int16))
             return
 
@@ -141,6 +142,9 @@ class MainWindow(widgets.QMainWindow):
         self._get_selected_mic(None)
         self.set_channels(self.channels)
         self.connect_mic()
+
+    def closeEvent(self, *args, **kwargs):
+        return
 
     def init_ui(self):
         main_frame = widgets.QFrame(self)
@@ -218,6 +222,11 @@ class MainWindow(widgets.QMainWindow):
         if self.mic is None:
             return
 
+        if len(Settings.GAIN) < channels:
+            Settings.GAIN = np.concatenate([
+                Settings.GAIN,
+                np.zeros(channels - len(Settings.GAIN))
+            ])
         self.mic.set_channels(channels)
         self.on_recording_mode("monitor")
         self.program_controller.monitor_button.setChecked(True)
@@ -234,6 +243,19 @@ class MainWindow(widgets.QMainWindow):
                 .controllers[ch_idx]
                 .SET_THRESHOLD
                 .connect(partial(self.detector.set_threshold, ch_idx)))
+            (self.recording_window
+                .controllers[ch_idx]
+                .SET_GAIN
+                .connect(partial(self.set_gain, ch_idx)))
+
+    def set_gain(self, ch_idx, value):
+        if len(Settings.GAIN) <= ch_idx:
+            Settings.GAIN = np.concatenate([
+                Settings.GAIN,
+                np.zeros(1 + ch_idx - len(Settings.GAIN))
+            ])
+
+        Settings.GAIN[ch_idx] = value
 
     def on_recording_mode(self, mode):
         if mode == "monitor":
@@ -395,6 +417,7 @@ class ProgramController(widgets.QFrame):
 class RecordingController(widgets.QFrame):
 
     SET_THRESHOLD = pyqtSignal(int)
+    SET_GAIN = pyqtSignal(int)
 
     def __init__(self, parent=None):
         """
@@ -422,9 +445,9 @@ class RecordingController(widgets.QFrame):
         self.slider.setMinimum(Settings.MIN_POWER_THRESHOLD)
         self.slider.setMaximum(Settings.MAX_POWER_THRESHOLD)
         self.slider.setValue(Settings.DEFAULT_POWER_THRESHOLD)
-        self.slider.setTickInterval(1000)
-        self.slider.setSingleStep(50)
-        self.slider.setPageStep(500)
+        self.slider.setTickInterval(20)
+        self.slider.setSingleStep(1)
+        self.slider.setPageStep(20)
 
         self.gain_control.valueChanged.connect(self.on_gain_change)
         self.slider.valueChanged.connect(self.on_threshold_change)
@@ -440,7 +463,7 @@ class RecordingController(widgets.QFrame):
 
     def on_gain_change(self, value):
         """TODO: make this gain per channel"""
-        Settings.GAIN = value
+        self.SET_GAIN.emit(value)
         self.gain_label.setText(str(value))
 
     def on_threshold_change(self, value):
@@ -490,7 +513,7 @@ class RecordingWindow(widgets.QFrame):
         self.spec_plots[ch_idx] = SpectrogramWidget(
             Settings.CHUNK,
             min_freq=500,
-            max_freq=8000,
+            max_freq=10000,
             window=Settings.PLOT_DURATION,
             show_x=False, #True if ch_idx == self.channels - 1 else False,
             cmap=None

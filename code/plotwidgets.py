@@ -1,4 +1,5 @@
 import collections
+import matplotlib.cm as cm
 
 import pyqtgraph as pg
 import numpy as np
@@ -133,11 +134,6 @@ class WaveformWidget(pg.PlotWidget):
         self._buffer = collections.deque(
             maxlen=int(window * Settings.RATE / Settings.CHUNK)
         )
-        '''
-        self._buffer = collections.deque(
-            maxlen=int(window * Settings.RATE)
-        )
-        '''
         self._buffer.extend(np.zeros(self._buffer.maxlen))
 
         self.showAxis("left", False)

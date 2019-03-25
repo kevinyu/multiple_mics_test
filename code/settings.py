@@ -1,4 +1,5 @@
 from PyQt5.QtCore import QSettings
+import numpy as np
 
 
 qsettings = QSettings("Theunissen Lab", "TLabRecorder")
@@ -8,7 +9,7 @@ class Settings(object):
     CHUNK = 512
     RATE = 44100
 
-    GAIN = 0
+    GAIN = np.array([0])
 
     USE_SOUNDDEVICE = True
 
