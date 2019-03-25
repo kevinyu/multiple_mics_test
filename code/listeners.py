@@ -70,7 +70,7 @@ class SoundDetector(MicrophoneListener):
             if ch_idx not in self.thresholds:
                 self.thresholds[ch_idx] = Settings.DEFAULT_POWER_THRESHOLD
             threshold_crossings = np.nonzero(
-                np.diff(np.power(np.abs(dat[:, ch_idx]), 2) > self.thresholds[ch_idx])
+                np.diff(np.abs(dat[:, ch_idx]) > self.thresholds[ch_idx])
             )[0]
 
             ratio = int(threshold_crossings.size) / Settings.DETECTION_CROSSINGS_PER_CHUNK

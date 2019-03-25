@@ -158,9 +158,9 @@ class WaveformWidget(pg.PlotWidget):
         self.threshold_line.setData([0, self._buffer.maxlen], [threshold, threshold])
 
     def receive_data(self, chunk):
-        self._buffer.append(np.max(np.power(np.abs(chunk), 2)))
+        # self._buffer.append(np.max(np.power(np.abs(chunk), 2)))
         # self._buffer.extend(np.power(np.abs(chunk), 2))
-        # self._buffer.append(np.max(np.abs(chunk[0])))
+        self._buffer.append(np.max(np.abs(chunk)))
 
     def draw(self):
         self.curve.setData(np.array(self._buffer))
