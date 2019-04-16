@@ -131,7 +131,7 @@ class MainWindow(widgets.QMainWindow):
         self._old_threads = []
 
         self.mic = None
-        self.bird_name = Settings.get("BIRD_NAME")
+        self.channel_names = {}
 
         self.init_ui()
         self.setup_listeners()
@@ -282,10 +282,12 @@ class MainWindow(widgets.QMainWindow):
             partial(self.on_recording_mode, "continuous")
         )
         self.program_controller.save_button.clicked.connect(self.run_file_loader)
-        self.program_controller.name_button.clicked.connect(self.run_bird_namer)
 
         self.program_controller.input_source.currentIndexChanged.connect(self._get_selected_mic)
         self.program_controller.input_source_channels.currentIndexChanged.connect(self.on_select_channels)
+
+        self.recording_window.UPDATE_CHANNEL_NAMES.connect(self.on_channel_names_changed)
+        self.recording_window.emit_channel_names()
 
     def update_display_path(self):
         path = self.saver.path
@@ -297,33 +299,32 @@ class MainWindow(widgets.QMainWindow):
                 os.path.basename(path),
                 self.saver.filename_format
             ))
+            self.program_controller.save_location.setToolTip("Saving to {}".format(display_path))
         else:
             display_path = os.path.join("[No path]", self.saver.filename_format)
+            self.program_controller.save_location.setToolTip("Not saving to {} until path is set".format(display_path))
 
-        self.program_controller.save_location.setText("Saving to {}".format(display_path))
+        text = "Saving to {}".format(display_path)
+        if len(text) > 40:
+            text = text[:37] + "..."
+        self.program_controller.save_location.setText(text)
 
-    def run_bird_namer(self):
-        value, okay = widgets.QInputDialog.getText(
-                self,
-                "Set Bird Name",
-                "Bird Name",
-                widgets.QLineEdit.Normal,
-                self.bird_name)
-        if okay:
-            self.bird_name = value or None
-
-        if self.bird_name:
-            Settings.set("BIRD_NAME", self.bird_name)
+    def on_channel_names_changed(self, channel_names):
+        Settings.set("CHANNEL_NAMES", channel_names)
+        self.channel_names = channel_names
 
         self.update_filename_format()
         self.update_display_path()
 
     @property
     def _filename_format(self):
-        if self.bird_name:
-            return "{}_{{0}}.wav".format(self.bird_name)
-        else:
-            return "recording_{0}.wav"
+        channel_strings = []
+        for key, val in sorted(self.channel_names.items()):
+            channel_strings.append(
+                "{}".format(val) if val else "ch{}".format(key)
+            )
+
+        return "{}_{{0}}.wav".format("_".join(channel_strings))
 
     def update_filename_format(self):
         self.saver.filename_format = self._filename_format
@@ -352,15 +353,18 @@ class ProgramController(widgets.QFrame):
         self.input_source = widgets.QComboBox(self)
         self.input_source_channels = widgets.QComboBox(self)
         self.save_button = widgets.QPushButton("Set save location", self)
-        self.name_button = widgets.QPushButton("Set bird name", self)
+        self.save_button.setToolTip("Save new recordings to this folder")
         self.save_location = widgets.QLabel("[No path]", self)
         self.last_save = widgets.QLabel("", self)
 
         self.monitor_button = widgets.QRadioButton("Monitor only")
+        self.monitor_button.setToolTip("Do not save new files")
         self.monitor_button.setChecked(True)
         self.trigger_button = widgets.QRadioButton(
                 "Triggered recording")
+        self.trigger_button.setToolTip("Record files when sound amplitude triggers detector")
         self.continuous_button = widgets.QRadioButton("Continuous recording")
+        self.continuous_button.setToolTip("Record audio continuously")
 
         if Settings.USE_SOUNDDEVICE:
             for i, device in enumerate(sd.query_devices()):
@@ -395,7 +399,6 @@ class ProgramController(widgets.QFrame):
         layout.setColumnStretch(3, 1)
         layout.setColumnStretch(4, 1)
         layout.addWidget(self.save_button, 1, 3)
-        layout.addWidget(self.name_button, 1, 4)
         layout.addWidget(self.save_location, 2, 3, 1, 2)
         layout.addWidget(self.last_save, 3, 3, 1, 2)
 
@@ -418,14 +421,21 @@ class RecordingController(widgets.QFrame):
 
     SET_THRESHOLD = pyqtSignal(int)
     SET_GAIN = pyqtSignal(int)
+    SET_NAME = pyqtSignal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, idx=None, name=None, parent=None):
         """
         Control settings for recording on this channel
 
         i.e. gain and threshold
         """
-        super(RecordingController, self).__init__(parent)
+        super(RecordingController, self).__init__(parent=parent)
+
+        self.idx = idx
+        self.name = name
+
+        self.name_button = widgets.QPushButton(self.short_name, self)
+        self.name_button.setToolTip(self.display_name)
         # self.gain_control = widgets.QDoubleSpinBox(self)
         self.gain_title = widgets.QLabel("Gain", self)
         self.gain_label = widgets.QLabel("0", self)
@@ -451,15 +461,30 @@ class RecordingController(widgets.QFrame):
 
         self.gain_control.valueChanged.connect(self.on_gain_change)
         self.slider.valueChanged.connect(self.on_threshold_change)
+        self.name_button.clicked.connect(self.run_name_change)
 
         layout = widgets.QGridLayout()
-        layout.addWidget(self.gain_title, 1, 1)
-        layout.addWidget(self.gain_label, 2, 1)
-        layout.addWidget(self.gain_control, 3, 1)
-        layout.addWidget(self.threshold_title, 1, 2)
-        layout.addWidget(self.threshold_label, 2, 2)
-        layout.addWidget(self.slider, 3, 2)
+        layout.addWidget(self.name_button, 1, 1, 1, 2)
+        layout.addWidget(self.gain_title, 2, 1)
+        layout.addWidget(self.gain_label, 3, 1)
+        layout.addWidget(self.gain_control, 4, 1)
+        layout.addWidget(self.threshold_title, 2, 2)
+        layout.addWidget(self.threshold_label, 3, 2)
+        layout.addWidget(self.slider, 4, 2)
         self.setLayout(layout)
+
+    @property
+    def display_name(self):
+        if self.name:
+            return "{}: {}".format(self.idx, self.name)
+        else:
+            return "{}".format(self.idx)
+
+    @property
+    def short_name(self):
+        if len(self.display_name) > 14:
+            return self.display_name[:11] + "..."
+        return self.display_name
 
     def on_gain_change(self, value):
         """TODO: make this gain per channel"""
@@ -470,8 +495,23 @@ class RecordingController(widgets.QFrame):
         self.SET_THRESHOLD.emit(value)
         self.threshold_label.setText(str(value))
 
+    def run_name_change(self, value):
+        value, okay = widgets.QInputDialog.getText(
+                self,
+                "Bird/Channel Name",
+                "Name",
+                widgets.QLineEdit.Normal,
+                self.name)
+        if okay:
+            self.name = value or None
+            self.name_button.setText(self.short_name)
+            self.name_button.setToolTip(self.display_name)
+            self.SET_NAME.emit(self.name)
+
 
 class RecordingWindow(widgets.QFrame):
+
+    UPDATE_CHANNEL_NAMES = pyqtSignal(dict)
 
     def __init__(self, channels, parent=None):
         super(RecordingWindow, self).__init__(parent=parent)
@@ -482,6 +522,7 @@ class RecordingWindow(widgets.QFrame):
     def reset(self):
         self.spec_plots = {}
         self.controllers = {}
+        self.channel_names = Settings.get("CHANNEL_NAMES", {})
         self.level_plots = {}
         self.curves = {}
         self.init_ui()
@@ -492,6 +533,11 @@ class RecordingWindow(widgets.QFrame):
             for ch_idx in range(self.channels):
                 if ch_idx not in self.controllers:
                     self.init_channel(ch_idx)
+            for ch_idx in range(self.channels):
+                self.update_channel_names(
+                    ch_idx,
+                    self.channel_names.get(ch_idx)
+                )
 
             for ch_idx in self.controllers:
                 if ch_idx >= self.channels:
@@ -504,7 +550,11 @@ class RecordingWindow(widgets.QFrame):
                     self.spec_plots[ch_idx].show()
 
     def init_channel(self, ch_idx):
-        self.controllers[ch_idx] = RecordingController()
+        self.controllers[ch_idx] = RecordingController(
+            idx=ch_idx,
+            name=self.channel_names.get(ch_idx)
+        )
+        self.channel_names[ch_idx] = self.channel_names.get(ch_idx)
         self.level_plots[ch_idx] = WaveformWidget(
             Settings.CHUNK,
             show_x=False,
@@ -521,6 +571,9 @@ class RecordingWindow(widgets.QFrame):
         self.controllers[ch_idx].SET_THRESHOLD.connect(
             self.level_plots[ch_idx].set_threshold
         )
+        self.controllers[ch_idx].SET_NAME.connect(
+            partial(self.update_channel_names, ch_idx)
+        )
 
         self.layout.setRowStretch(2 * ch_idx + 1, 3)
         self.layout.addWidget(
@@ -533,6 +586,16 @@ class RecordingWindow(widgets.QFrame):
         self.layout.setColumnStretch(2, 10)
         self.layout.addWidget(
             self.controllers[ch_idx], 2 * ch_idx + 1, 1, 2, 1)
+
+    def update_channel_names(self, ch_idx, name):
+        self.channel_names[ch_idx] = name
+        self.emit_channel_names()
+
+    def emit_channel_names(self):
+        self.UPDATE_CHANNEL_NAMES.emit({
+            key: self.channel_names[key]
+            for key in range(self.channels)
+        })
 
     def init_ui(self):
         self.layout = widgets.QGridLayout()

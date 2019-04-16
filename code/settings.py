@@ -12,6 +12,7 @@ class Settings(object):
     GAIN = np.array([0])
 
     USE_SOUNDDEVICE = True
+    CHANNEL_NAMES = {}
 
     BASE_DIRECTORY = None
     FILENAME_SUFFIX = "time"
@@ -31,8 +32,8 @@ class Settings(object):
     PLOT_DURATION = 5.0
 
     @classmethod
-    def get(cls, key):
-        return qsettings.value(key, getattr(cls, key, None))
+    def get(cls, key, otherwise=None):
+        return qsettings.value(key, getattr(cls, key, otherwise))
 
     @classmethod
     def set(cls, key, val):
