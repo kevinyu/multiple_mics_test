@@ -13,6 +13,7 @@ from PyQt5.QtCore import QTimer, pyqtSignal, QObject, QThread, pyqtSlot, Qt
 from listeners import SoundDetector, SoundSaver
 from plotwidgets import SpectrogramWidget, WaveformWidget
 from settings import Settings
+from utils import prevent_standby
 
 
 class BaseMicrophone(QObject):
@@ -407,7 +408,7 @@ class ProgramController(widgets.QFrame):
     def update_channel_dropdown(self, idx):
         device = self.input_source.currentData()
         self.input_source_channels.clear()
-        
+
         if Settings.USE_SOUNDDEVICE:
             max_channels = device.get("max_input_channels")
         else:
@@ -609,7 +610,7 @@ class RecordingWindow(widgets.QFrame):
         for ch_idx in range(self.channels):
             self.spec_plots[ch_idx].draw()
             self.level_plots[ch_idx].draw()
- 
+
     @pyqtSlot(object)
     def receive_data(self, data):
         if data.shape[1] != self.channels:
@@ -626,6 +627,9 @@ def run(argv):
     window = MainWindow()
     window.show()
 
+    # don't allow windows to sleep while the app runs
+    prevent_standby()
+    
     sys.exit(app.exec_())
 
 
