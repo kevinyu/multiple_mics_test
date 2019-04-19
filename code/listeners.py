@@ -10,6 +10,7 @@ from PyQt5.QtCore import pyqtSignal, pyqtSlot, QThread, QObject, QTimer
 
 from settings import Settings
 from utils import datetime2str
+from ringbuffer import RingBuffer
 
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,7 @@ class SoundDetector(MicrophoneListener):
 
     def __init__(self, size, parent=None):
         super(SoundDetector, self).__init__(parent)
-        self._buffer = collections.deque(maxlen=size)
+        self._buffer = RingBuffer(maxlen=size)
         self._channels = None
         self.thresholds = {}
 
@@ -103,8 +104,8 @@ class SoundSaver(MicrophoneListener):
             Size of each file to be saved in samples
         """
         super(SoundSaver, self).__init__(parent)
-        self._buffer = collections.deque()
-        self._save_buffer = collections.deque()
+        self._buffer = RingBuffer()
+        self._save_buffer = RingBuffer()
         self._idx = 0
         self.path = path
         self.saving = saving
@@ -151,11 +152,11 @@ class SoundSaver(MicrophoneListener):
         self.triggered = triggered
         self._buffer.clear()
         if self.triggered:
-            self._buffer = collections.deque(
+            self._buffer = RingBuffer(
                 maxlen=int(Settings.DETECTION_BUFFER * Settings.RATE)
             )
         else:
-            self._buffer = collections.deque()
+            self._buffer = RingBuffer()
 
     def set_saving(self, saving):
         self.saving = saving
@@ -207,7 +208,7 @@ class SoundSaver(MicrophoneListener):
 
         if not self.path:
             print("Warning: No path is configured")
-            return 
+            return
 
         if not os.path.exists(self.path):
             print("Warning: {} does not exist".format(self.path))
