@@ -1,6 +1,8 @@
 import ctypes
 import platform
 
+import numpy as np
+
 
 ES_CONTINUOUS = 0x80000000
 ES_SYSTEM_REQUIRED = 0x00000001
@@ -40,3 +42,8 @@ def long_running(func):
         allow_standby()
         return result
     return inner
+
+
+def db_scale(x, dB=None):
+    """Scale the channels of a signal (in dB) independently"""
+    return np.power(10.0, dB / 20.0) * x

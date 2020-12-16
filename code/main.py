@@ -13,7 +13,7 @@ from PyQt5.QtCore import QTimer, pyqtSignal, QObject, QThread, pyqtSlot, Qt
 from listeners import SoundDetector, SoundSaver
 from plotwidgets import SpectrogramWidget, WaveformWidget
 from settings import Settings
-from utils import prevent_standby
+from utils import db_scale, prevent_standby
 
 
 class BaseMicrophone(QObject):
@@ -67,17 +67,20 @@ class PyAudioMicrophone(BaseMicrophone):
                 data[idx::self.channels]
                 for idx in range(self.channels)
             ]).T
-            scaled = np.power(10.0, Settings.GAIN[:self.channels] / 20.0) * new_data
+            scaled = db_scale(new_data, Settings.GAIN[:self.channels])
 
             self.REC.emit(scaled)
 
             return (in_data, pyaudio.paContinue)
 
+        self._device_info = self.p.get_device_info_by_index(self.device_index)
+        self._rate = int(self._device_info.get("defaultSampleRate", Settings.RATE))
+
         try:
             self._stream = self.p.open(
                 format=pyaudio.paInt16,
                 channels=self.channels,
-                rate=Settings.RATE,
+                rate=self._rate,
                 frames_per_buffer=Settings.CHUNK,
                 input=True,
                 output=False,
@@ -94,18 +97,22 @@ class SoundDeviceMicrophone(BaseMicrophone):
         super(SoundDeviceMicrophone, self).__init__(device_index=device_index, channels=channels, parent=parent)
         self._stream = None
         self._stop = False
+        self._dtype = Settings.DTYPE
         self._gain = Settings.GAIN
 
     def _run(self):
         def _callback(in_data, frame_count, time_info, status):
-            scaled = np.power(10.0, Settings.GAIN[:self.channels] / 20.0) * in_data
-            self.REC.emit(scaled.astype(np.int16))
+            scaled = db_scale(in_data, Settings.GAIN[:self.channels])
+            self.REC.emit(scaled.astype(self._dtype))
             return
+
+        self._device_info = sd.query_devices()[self.device_index]
+        self._rate = int(self._device_info.get("default_samplerate", Settings.RATE))
 
         try:
             self._stream = sd.InputStream(
-                    dtype=np.int16,
-                    samplerate=Settings.RATE,
+                    dtype=self._dtype,
+                    samplerate=self._rate,
                     blocksize=Settings.CHUNK,
                     device=self.device_index,
                     channels=self.channels,
@@ -206,8 +213,18 @@ class MainWindow(widgets.QMainWindow):
         self.channels = 1
         self.on_recording_mode("monitor")
         self.program_controller.monitor_button.setChecked(True)
+
         if not self.mic:
-            self.mic = SoundDeviceMicrophone(device_index=device_index, channels=self.channels)
+            if Settings.USE_SOUNDDEVICE:
+                self.mic = SoundDeviceMicrophone(
+                    device_index=device_index,
+                    channels=self.channels,
+                )
+            else:
+                self.mic = PyAudioMicrophone(
+                    device_index=device_index,
+                    channels=self.channels,
+                )
         else:
             self.mic.set_device_index(device_index)
 
@@ -553,7 +570,8 @@ class RecordingWindow(widgets.QFrame):
     def init_channel(self, ch_idx):
         self.controllers[ch_idx] = RecordingController(
             idx=ch_idx,
-            name=self.channel_names.get(ch_idx)
+            name=self.channel_names.get(ch_idx),
+
         )
         self.channel_names[ch_idx] = self.channel_names.get(ch_idx)
         self.level_plots[ch_idx] = WaveformWidget(

@@ -6,8 +6,9 @@ qsettings = QSettings("Theunissen Lab", "TLabRecorder")
 
 
 class Settings(object):
-    CHUNK = 512
+    CHUNK = 1024
     RATE = 44100
+    DTYPE = np.int16
 
     GAIN = np.array([0])
 
