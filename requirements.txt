@@ -1,8 +1,11 @@
+click>=7.1.2
 jupyter>=1.0.0
 matplotlib>=3.0.3
 numpy>=1.16.0
+opencv-python>=4.5.1.48
 PyAudio>=0.2.11
 PyQt5>=5.12.1
 pyqtgraph>=0.10.0
 scipy>=1.2.0
 sounddevice>=0.3.13
+SoundFile>=0.10.3.post1
