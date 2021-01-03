@@ -38,3 +38,11 @@ pip install -r requirements.txt
 ```shell
 (env)$ python code/main.py
 ```
+
+## Spec Viewer
+
+In progress a viewer for spectrograms in the command line. Ultimately I want to make this a live audio viewer in the terminal, but for now it is a stand alone cli.
+
+```shell
+(env)$ python code/specview.py FOLDERS or FILENAMES -r ROWS -c COLS --cmap greys|viridis|plasma|blues
+```
