@@ -143,7 +143,7 @@ class MainWindow(widgets.QMainWindow):
 
         self.init_ui()
         self.setup_listeners()
-        self.update_filename_format()
+        self.update_save_paths()
         self.update_display_path()
         self.connect_events()
 
@@ -300,6 +300,7 @@ class MainWindow(widgets.QMainWindow):
             partial(self.on_recording_mode, "continuous")
         )
         self.program_controller.save_button.clicked.connect(self.run_file_loader)
+        self.program_controller.save_mode_toggle.stateChanged.connect(self.toggle_save_channels_separately)
 
         self.program_controller.input_source.currentIndexChanged.connect(self._get_selected_mic)
         self.program_controller.input_source_channels.currentIndexChanged.connect(self.on_select_channels)
@@ -312,10 +313,14 @@ class MainWindow(widgets.QMainWindow):
         if path is not None:
             display_path = str(os.path.join(
                 os.sep,
-                "[...]",
+                "-",
                 os.path.basename(os.path.dirname(path)),
                 os.path.basename(path),
-                self.saver.filename_format
+                (
+                    self.saver.filename_format if isinstance(self.saver.filename_format, str)
+                    else self.saver.filename_format[0] if len(self.saver.filename_format)
+                    else ""
+                )
             ))
             self.program_controller.save_location.setToolTip("Saving to {}".format(display_path))
         else:
@@ -331,21 +336,39 @@ class MainWindow(widgets.QMainWindow):
         Settings.set("CHANNEL_NAMES", channel_names)
         self.channel_names = channel_names
 
-        self.update_filename_format()
+        self.update_save_paths()
         self.update_display_path()
 
     @property
     def _filename_format(self):
         channel_strings = []
-        for key, val in sorted(self.channel_names.items()):
-            channel_strings.append(
-                "{}".format(val) if val else "ch{}".format(key)
-            )
+        if Settings.SAVE_CHANNELS_SEPARATELY:
+            for key, val in sorted(self.channel_names.items()):
+                channel_strings.append(
+                    "{}".format(val) if val else "ch{}".format(key)
+                )
+            formats = ["{}_{{0}}".format(val) for val in channel_strings]
+            return formats
+        else:
+            for key, val in sorted(self.channel_names.items()):
+                channel_strings.append(
+                    "{}".format(val) if val else "ch{}".format(key)
+                )
+            return "{}_{{0}}.wav".format("_".join(channel_strings))
 
-        return "{}_{{0}}.wav".format("_".join(channel_strings))
+    @property
+    def _channel_folders(self):
+        if Settings.SAVE_CHANNELS_SEPARATELY:
+            folder_names = []
+            for key, val in sorted(self.channel_names.items()):
+                folder_names.append("{}".format(val) if val else "ch{}".format(key))
+            return folder_names
+        else:
+            return None
 
-    def update_filename_format(self):
+    def update_save_paths(self):
         self.saver.filename_format = self._filename_format
+        self.saver.channel_folders = self._channel_folders
 
     def run_file_loader(self):
         options = widgets.QFileDialog.Options()
@@ -358,6 +381,14 @@ class MainWindow(widgets.QMainWindow):
             Settings.set("SAVE_DIRECTORY", path)
             self.saver.path = path
             self.update_display_path()
+
+    def toggle_save_channels_separately(self):
+        btn = self.program_controller.save_mode_toggle
+        if btn.isChecked():
+            Settings.set("SAVE_CHANNELS_SEPARATELY", True)
+        else:
+            Settings.set("SAVE_CHANNELS_SEPARATELY", False)
+        self.update_save_paths()
 
 
 class ProgramController(widgets.QFrame):
@@ -373,7 +404,11 @@ class ProgramController(widgets.QFrame):
         self.save_button = widgets.QPushButton("Set save location", self)
         self.save_button.setToolTip("Save new recordings to this folder")
         self.save_location = widgets.QLabel("[No path]", self)
+
         self.last_save = widgets.QLabel("", self)
+
+        self.save_mode_toggle = widgets.QCheckBox("Save channels separately", self)
+        self.save_mode_toggle.setChecked(Settings.SAVE_CHANNELS_SEPARATELY)
 
         self.monitor_button = widgets.QRadioButton("Monitor only")
         self.monitor_button.setToolTip("Do not save new files")
@@ -417,8 +452,9 @@ class ProgramController(widgets.QFrame):
         layout.setColumnStretch(3, 1)
         layout.setColumnStretch(4, 1)
         layout.addWidget(self.save_button, 1, 3)
-        layout.addWidget(self.save_location, 2, 3, 1, 2)
-        layout.addWidget(self.last_save, 3, 3, 1, 2)
+        layout.addWidget(self.save_mode_toggle, 2, 3, 1, 2)
+        layout.addWidget(self.save_location, 3, 3, 1, 2)
+        layout.addWidget(self.last_save, 4, 3, 1, 2)
 
         self.setLayout(layout)
 
@@ -647,7 +683,7 @@ def run(argv):
 
     # don't allow windows to sleep while the app runs
     prevent_standby()
-    
+
     sys.exit(app.exec_())
 
 

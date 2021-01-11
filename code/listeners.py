@@ -92,6 +92,7 @@ class SoundSaver(MicrophoneListener):
             path,
             triggered=False,
             saving=False,
+            channel_folders=None,
             filename_format="recording_{0}.wav",
             min_size=None,
             sampling_rate=44100,
@@ -109,11 +110,12 @@ class SoundSaver(MicrophoneListener):
         self._idx = 0
         self.path = path
         self.saving = saving
+        self.channel_folders = channel_folders
         self.triggered = triggered
         self.min_size = min_size
         self.sampling_rate = sampling_rate
         self.filename_format = filename_format
-        self._file_idx = 0
+        self._file_idx = collections.defaultdict(int)
         self.size = size
         self._recording = False
         self._trigger_timer = None
@@ -214,19 +216,45 @@ class SoundSaver(MicrophoneListener):
             print("Warning: {} does not exist".format(self.path))
             return
 
-        if Settings.FILENAME_SUFFIX == "time":
-            start_time = datetime.datetime.now() - datetime.timedelta(seconds=len(data) / Settings.RATE)
-            time_str = datetime2str(start_time)
-            filename = self.filename_format.format(time_str)
-            path = os.path.join(self.path, filename)
-        else:
-            filename = self.filename_format.format(self._file_idx)
-            path = os.path.join(self.path, filename)
-            while os.path.exists(path):
-                self._file_idx += 1
-                filename = self.filename_format.format(self._file_idx)
-                path = os.path.join(self.path, filename)
+        start_time = datetime.datetime.now() - datetime.timedelta(seconds=len(data) / Settings.RATE)
+        time_str = datetime2str(start_time)
 
-        print("\nSaving file to {}\n".format(path))
-        self.SAVE_EVENT.emit(path)
-        scipy.io.wavfile.write(path, self.sampling_rate, data.astype(np.int16))
+        if Settings.SAVE_CHANNELS_SEPARATELY and isinstance(self.channel_folders, list) and isinstance(self.filename_format, list):
+            for channel, folder_name, filename_format in zip(range(self._channels), self.channel_folders, self.filename_format):
+                folder_path = os.path.join(self.path, folder_name)
+                if not os.path.exists(folder_path):
+                    os.makedirs(folder_path)
+                    print("\nSaving file to {}\n".format(folder_path))
+
+                if Settings.FILENAME_SUFFIX == "time":
+                    filename_str = filename_format.format(time_str)
+                    path = os.path.join(folder_path, filename_str)
+                else:
+                    filename_str = filename_format.format(self._file_idx[channel])
+                    path = os.path.join(folder_path, filename_str)
+                    while os.path.exists(path):
+                        self._file_idx[channel] += 1
+                        filename_str = filename_format.format(self._file_idx[channel])
+                        path = os.path.join(folder_path, filename_str)
+                self.SAVE_EVENT.emit(path)
+                scipy.io.wavfile.write(path, self.sampling_rate, data.astype(Settings.DTYPE)[:, channel])
+        elif not Settings.SAVE_CHANNELS_SEPARATELY:
+            folder_path = self.path
+            filename_format = self.filename_format
+            channel = None
+
+            if Settings.FILENAME_SUFFIX == "time":
+                filename_str = filename_format.format(time_str)
+                path = os.path.join(folder_path, filename_str)
+            else:
+                filename_str = filename_format.format(self._file_idx[channel])
+                path = os.path.join(folder_path, filename_str)
+                while os.path.exists(path):
+                    self._file_idx[channel] += 1
+                    filename_str = filename_format.format(self._file_idx[channel])
+                    path = os.path.join(folder_path, filename_str)
+
+            self.SAVE_EVENT.emit(path)
+            scipy.io.wavfile.write(path, self.sampling_rate, data.astype(Settings.DTYPE))
+        else:
+            raise Exception("When SAVE_CHANNELS_SEPARATELY is on, need channel_folders and filename_format to be lists")

@@ -14,6 +14,7 @@ class Settings(object):
 
     USE_SOUNDDEVICE = True
     CHANNEL_NAMES = {}
+    SAVE_CHANNELS_SEPARATELY = True
 
     BASE_DIRECTORY = None
     FILENAME_SUFFIX = "time"
