@@ -20,6 +20,7 @@ class BaseMicrophone(QObject):
 
     REC = pyqtSignal(object)
     STOP = pyqtSignal()
+    SET_RATE = pyqtSignal(int)
 
     def __init__(self, device_index=None, channels=1, parent=None):
         super(BaseMicrophone, self).__init__(parent)
@@ -75,6 +76,7 @@ class PyAudioMicrophone(BaseMicrophone):
 
         self._device_info = self.p.get_device_info_by_index(self.device_index)
         self._rate = int(self._device_info.get("defaultSampleRate", Settings.RATE))
+        self.SET_RATE.emit(self._rate)
 
         try:
             self._stream = self.p.open(
@@ -108,6 +110,7 @@ class SoundDeviceMicrophone(BaseMicrophone):
 
         self._device_info = sd.query_devices()[self.device_index]
         self._rate = int(self._device_info.get("default_samplerate", Settings.RATE))
+        self.SET_RATE.emit(self._rate)
 
         try:
             self._stream = sd.InputStream(
@@ -134,12 +137,12 @@ class MainWindow(widgets.QMainWindow):
 
         self.recording_window = RecordingWindow(self.channels, self)
         self.frame_timer = QTimer()
-        self.frame_timer.start(1000 * 1.0/120.0)
+        self.frame_timer.start(int(1000 /Settings.FRAMERATE))
         self.frame_timer.timeout.connect(self.recording_window._loop)
         self._old_threads = []
 
         self.mic = None
-        self.channel_names = {}
+        self.channel_names = Settings.CHANNEL_NAMES
 
         self.init_ui()
         self.setup_listeners()
@@ -159,6 +162,7 @@ class MainWindow(widgets.QMainWindow):
         self.layout = widgets.QVBoxLayout()
 
         self.recording_indicator = widgets.QLabel("Trigger OFF", self)
+        self.recording_indicator.setStyleSheet("QLabel {font-weight: bold; color : black;}")
 
         self.scroll_area = widgets.QScrollArea(self)
         # self.scroll_area.setFixedHeight(650)
@@ -201,9 +205,15 @@ class MainWindow(widgets.QMainWindow):
 
     def update_recording_indicator(self, val):
         if val:
-            self.recording_indicator.setText("Trigger ON")
+            if self.saver.triggered:
+                self.recording_indicator.setText("🔴 Trigger ON")
+            else:
+                self.recording_indicator.setText("Trigger ON")
+            self.recording_indicator.setStyleSheet("QLabel {font-weight: bold; color : red;}")
+
         else:
             self.recording_indicator.setText("Trigger OFF")
+            self.recording_indicator.setStyleSheet("QLabel {font-weight: bold; color : black;}")
 
     def _get_selected_mic(self, idx):
         device = self.program_controller.input_source.currentData()
@@ -225,6 +235,8 @@ class MainWindow(widgets.QMainWindow):
                     device_index=device_index,
                     channels=self.channels,
                 )
+            self.mic.SET_RATE.connect(self.saver.set_sampling_rate)
+            self.mic.SET_RATE.connect(self.detector.set_sampling_rate)
         else:
             self.mic.set_device_index(device_index)
 
@@ -243,7 +255,7 @@ class MainWindow(widgets.QMainWindow):
         if len(Settings.GAIN) < channels:
             Settings.GAIN = np.concatenate([
                 Settings.GAIN,
-                np.zeros(channels - len(Settings.GAIN))
+                Settings.DEFAULT_GAIN * np.ones(channels - len(Settings.GAIN))
             ])
         self.mic.set_channels(channels)
         self.on_recording_mode("monitor")
@@ -270,7 +282,7 @@ class MainWindow(widgets.QMainWindow):
         if len(Settings.GAIN) <= ch_idx:
             Settings.GAIN = np.concatenate([
                 Settings.GAIN,
-                np.zeros(1 + ch_idx - len(Settings.GAIN))
+                Settings.DEFAULT_GAIN * np.ones(1 + ch_idx - len(Settings.GAIN))
             ])
 
         Settings.GAIN[ch_idx] = value
@@ -280,14 +292,18 @@ class MainWindow(widgets.QMainWindow):
             self.saver.set_triggered(False)
             self.saver.set_saving(False)
             self.program_controller.last_save.setText("Monitoring...")
+            self.program_controller.last_save.setStyleSheet("QLabel {font-weight: bold; color : green;}")
         elif mode == "triggered":
             self.saver.set_triggered(True)
             self.saver.set_saving(True)
-            self.program_controller.last_save.setText("Recording on trigger...")
+            self.program_controller.last_save.setText("Triggered Recording Mode...")
+            self.program_controller.last_save.setStyleSheet("QLabel {font-weight: bold; color : orange;}")
+
         elif mode == "continuous":
             self.saver.set_triggered(False)
             self.saver.set_saving(True)
-            self.program_controller.last_save.setText("Recording...")
+            self.program_controller.last_save.setText("🔴 Recording...")
+            self.program_controller.last_save.setStyleSheet("QLabel {font-weight: bold; color : red;}")
 
     def connect_events(self):
         self.program_controller.monitor_button.clicked.connect(
@@ -347,7 +363,7 @@ class MainWindow(widgets.QMainWindow):
                 channel_strings.append(
                     "{}".format(val) if val else "ch{}".format(key)
                 )
-            formats = ["{}_{{0}}".format(val) for val in channel_strings]
+            formats = ["{}_{{0}}.wav".format(val) for val in channel_strings]
             return formats
         else:
             for key, val in sorted(self.channel_names.items()):
@@ -437,24 +453,28 @@ class ProgramController(widgets.QFrame):
 
         layout = widgets.QGridLayout()
 
-        layout.setColumnStretch(1, 0.5)
-        layout.setColumnStretch(2, 0.5)
         layout.addWidget(widgets.QLabel("Device:", parent=self), 1, 1)
         layout.addWidget(self.input_source, 1, 2)
-        layout.addWidget(widgets.QLabel("Channels:", parent=self), 2, 1)
-        layout.addWidget(self.input_source_channels, 2, 2)
+        layout.addWidget(widgets.QLabel("Channels:", parent=self), 1, 3)
+        layout.addWidget(self.input_source_channels, 1, 4)
+
+        layout.setColumnStretch(1, 0)
+        layout.setColumnStretch(2, 0)
+        layout.setColumnStretch(3, 0)
+        layout.setColumnStretch(4, 0)
+
 
         # layout.setColumnStretch(3, 1)
-        layout.addWidget(self.monitor_button, 3, 2)
-        layout.addWidget(self.trigger_button, 4, 2)
-        layout.addWidget(self.continuous_button, 5, 2)
+        layout.addWidget(self.monitor_button, 2, 2)
+        layout.addWidget(self.trigger_button, 3, 2)
+        layout.addWidget(self.continuous_button, 4, 2)
 
-        layout.setColumnStretch(3, 1)
-        layout.setColumnStretch(4, 1)
-        layout.addWidget(self.save_button, 1, 3)
-        layout.addWidget(self.save_mode_toggle, 2, 3, 1, 2)
-        layout.addWidget(self.save_location, 3, 3, 1, 2)
-        layout.addWidget(self.last_save, 4, 3, 1, 2)
+        layout.setColumnStretch(5, 1)
+        layout.setColumnStretch(5, 1)
+        layout.addWidget(self.save_button, 1, 5)
+        layout.addWidget(self.save_mode_toggle, 2, 5, 1, 2)
+        layout.addWidget(self.save_location, 3, 5, 1, 2)
+        layout.addWidget(self.last_save, 4, 5, 1, 2)
 
         self.setLayout(layout)
 
@@ -488,66 +508,88 @@ class RecordingController(widgets.QFrame):
         self.idx = idx
         self.name = name
 
-        self.name_button = widgets.QPushButton(self.short_name, self)
-        self.name_button.setToolTip(self.display_name)
-        # self.gain_control = widgets.QDoubleSpinBox(self)
-        self.gain_title = widgets.QLabel("Gain", self)
-        self.gain_label = widgets.QLabel("0", self)
-        self.gain_control = widgets.QSlider(Qt.Vertical, self)
-        self.gain_control.setTickPosition(widgets.QSlider.TicksBothSides)
-        self.gain_control.setMinimum(-10)
-        self.gain_control.setMaximum(20)
-        self.gain_control.setValue(0)
-        self.gain_control.setTickInterval(2)
-        self.gain_control.setSingleStep(1)
-        self.gain_control.setPageStep(2)
+        self.name_label = widgets.QLabel(self.display_name, self)
+        self.name_label.setMaximumWidth(200)
+        # self.name_label.setWordWrap(True)
 
-        self.threshold_title = widgets.QLabel("Threshold", self)
-        self.threshold_label = widgets.QLabel(str(Settings.DEFAULT_POWER_THRESHOLD), self)
-        self.slider = widgets.QSlider(Qt.Vertical, self)
-        self.slider.setTickPosition(widgets.QSlider.TicksBothSides)
-        self.slider.setMinimum(Settings.MIN_POWER_THRESHOLD)
-        self.slider.setMaximum(Settings.MAX_POWER_THRESHOLD)
-        self.slider.setValue(Settings.DEFAULT_POWER_THRESHOLD)
-        self.slider.setTickInterval(20)
-        self.slider.setSingleStep(1)
-        self.slider.setPageStep(20)
+        self.name_button = widgets.QPushButton("Edit {}".format(self.short_name), self)
+        self.name_button.setToolTip(self.display_name)
+
+
+        self.gain_control = widgets.QDoubleSpinBox(self)
+        self.gain_title = widgets.QLabel("Gain (dB)", self)
+        # self.gain_label = widgets.QLabel(str(Settings.DEFAULT_GAIN), self)
+        # self.gain_control = widgets.QSlider(Qt.Vertical, self)
+        # self.gain_control.setTickPosition(widgets.QSlider.TicksLeft)
+        self.gain_control.setMinimum(-30)
+        self.gain_control.setMaximum(60)
+        # self.gain_control.setTickInterval(5)
+        # self.gain_control.setSingleStep(1)
+        # self.gain_control.setPageStep(2)
+        self.gain_control.setValue(Settings.DEFAULT_GAIN)
+
+        self.threshold_title = widgets.QLabel("Thresh", self)
+        # self.threshold_label = widgets.QLabel(str(Settings.DEFAULT_POWER_THRESHOLD), self)
+        self.thresh_slider = widgets.QSlider(Qt.Horizontal, self)
+        self.thresh_slider.setTickPosition(widgets.QSlider.TicksLeft)
+        self.thresh_slider.setMinimum(Settings.MIN_POWER_THRESHOLD)
+        self.thresh_slider.setMaximum(Settings.MAX_POWER_THRESHOLD)
+        self.thresh_slider.setValue(Settings.DEFAULT_POWER_THRESHOLD)
+        self.thresh_slider.setTickInterval(200)
+        self.thresh_slider.setSingleStep(1)
+        self.thresh_slider.setPageStep(20)
+        self.thresh_spinbox = widgets.QDoubleSpinBox(self)
+        self.thresh_spinbox.setMinimum(Settings.MIN_POWER_THRESHOLD)
+        self.thresh_spinbox.setMaximum(Settings.MAX_POWER_THRESHOLD)
+        self.thresh_spinbox.setValue(Settings.DEFAULT_POWER_THRESHOLD)
 
         self.gain_control.valueChanged.connect(self.on_gain_change)
-        self.slider.valueChanged.connect(self.on_threshold_change)
+        self.thresh_slider.valueChanged.connect(self.on_threshold_change)
+        self.thresh_spinbox.valueChanged.connect(self.on_threshold_change)
+
         self.name_button.clicked.connect(self.run_name_change)
 
         layout = widgets.QGridLayout()
-        layout.addWidget(self.name_button, 1, 1, 1, 2)
-        layout.addWidget(self.gain_title, 2, 1)
-        layout.addWidget(self.gain_label, 3, 1)
-        layout.addWidget(self.gain_control, 4, 1)
-        layout.addWidget(self.threshold_title, 2, 2)
-        layout.addWidget(self.threshold_label, 3, 2)
-        layout.addWidget(self.slider, 4, 2)
+        layout.setAlignment(Qt.AlignTop)
+        layout.addWidget(self.name_label, 1, 1, 1, 2)
+
+        layout.addWidget(self.name_button, 2, 1, 1, 2)
+        layout.addWidget(self.gain_title, 3, 1)
+        layout.addWidget(self.gain_control, 3, 2)
+        # layout.addWidget(self.gain_control, 4, 1)
+        layout.addWidget(self.threshold_title, 4, 1)
+        layout.addWidget(self.thresh_spinbox, 4, 2)
+        layout.addWidget(self.thresh_slider, 5, 1)
+
+        # layout.addWidget(self.slider, 4, 2)
+
+        # sublayout.addStretch()
+
         self.setLayout(layout)
 
     @property
     def display_name(self):
         if self.name:
-            return "{}: {}".format(self.idx, self.name)
+            return "Ch{}: {}".format(self.idx, self.name)
         else:
-            return "{}".format(self.idx)
+            return "Ch{}".format(self.idx)
 
     @property
     def short_name(self):
-        if len(self.display_name) > 14:
-            return self.display_name[:11] + "..."
+        if len(self.display_name) > 18:
+            return self.display_name[5:15] + "..."
         return self.display_name
 
     def on_gain_change(self, value):
         """TODO: make this gain per channel"""
-        self.SET_GAIN.emit(value)
-        self.gain_label.setText(str(value))
+        self.SET_GAIN.emit(int(value))
+        # self.gain_label.setText(str(value))
 
     def on_threshold_change(self, value):
-        self.SET_THRESHOLD.emit(value)
-        self.threshold_label.setText(str(value))
+        self.thresh_slider.setValue(int(value))
+        self.thresh_spinbox.setValue(int(value))
+        self.SET_THRESHOLD.emit(int(value))
+        # self.threshold_label.setText(str(value))
 
     def run_name_change(self, value):
         value, okay = widgets.QInputDialog.getText(
@@ -558,8 +600,9 @@ class RecordingController(widgets.QFrame):
                 self.name)
         if okay:
             self.name = value or None
-            self.name_button.setText(self.short_name)
+            self.name_button.setText("Edit {}".format(self.short_name))
             self.name_button.setToolTip(self.display_name)
+            self.name_label.setText(self.display_name)
             self.SET_NAME.emit(self.name)
 
 

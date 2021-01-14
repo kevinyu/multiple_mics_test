@@ -79,7 +79,7 @@ def cmapToColormap(cmap, nTicks=16):
     # Case #X: unknown format or datatype was the wrong object type
     else:
         raise ValueError("[cmapToColormap] Unknown cmap format or not a cmap!")
-    
+
     # Convert the RGB float values to RGBA integer values
     return list([(pos, (int(r), int(g), int(b), 255)) for pos, (r, g, b) in rgb_list])
 
@@ -153,7 +153,7 @@ class SpectrogramWidget(pg.PlotWidget):
         lut = self.cmap.getLookupTable(0.0, 1.0, 256)
 
         self.img.setLookupTable(lut)
-        self.img.setLevels([-50,40])
+        self.img.setLevels([Settings.SPEC_LEVELS_MIN, Settings.SPEC_LEVELS_MAX])
 
         yscale = (
             1.0 /
@@ -207,10 +207,12 @@ class WaveformWidget(pg.PlotWidget):
             window=5,
             ylim=(0, Settings.MAX_POWER_THRESHOLD),
             threshold=Settings.DEFAULT_POWER_THRESHOLD,
+            downsample=Settings.DISPLAY_AMP_DOWNSAMPLE,
         ):
         super(WaveformWidget, self).__init__()
+        self.downsample = downsample
         self._buffer = collections.deque(
-            maxlen=int(window * Settings.RATE / Settings.CHUNK)
+            maxlen=int(window * Settings.RATE / self.downsample)
         )
         self._buffer.extend(np.zeros(self._buffer.maxlen))
 
@@ -225,6 +227,7 @@ class WaveformWidget(pg.PlotWidget):
         self.setMouseEnabled(False, False)
         self.setMenuEnabled(False)
         self.hideButtons()
+        ylim = (-Settings.MAX_POWER_THRESHOLD, Settings.MAX_POWER_THRESHOLD)
         self.setYRange(*ylim, padding=0)
 
     def set_threshold(self, threshold):
@@ -234,8 +237,7 @@ class WaveformWidget(pg.PlotWidget):
     def receive_data(self, chunk):
         # self._buffer.append(np.max(np.power(np.abs(chunk), 2)))
         # self._buffer.extend(np.power(np.abs(chunk), 2))
-        self._buffer.append(np.max(np.abs(chunk)))
+        self._buffer.extend(chunk[::self.downsample])
 
     def draw(self):
         self.curve.setData(np.array(self._buffer))
-

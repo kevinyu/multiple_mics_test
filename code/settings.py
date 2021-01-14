@@ -10,7 +10,8 @@ class Settings(object):
     RATE = 44100
     DTYPE = np.int16
 
-    GAIN = np.array([0])
+    DEFAULT_GAIN = 20
+    GAIN = np.array([DEFAULT_GAIN])
 
     USE_SOUNDDEVICE = True
     CHANNEL_NAMES = {}
@@ -20,18 +21,24 @@ class Settings(object):
     FILENAME_SUFFIX = "time"
     SAVE_DIRECTORY = None
     SAVE_CONTINUOUSLY = False
-    FILE_DURATION = 30      # seconds
+    FILE_DURATION = 10      # seconds
     MIN_FILE_DURATION = 1.0   # seconds
     MAX_TRIGGERED_DURATION = 20   # seconds
+
+    DISPLAY_AMP_DOWNSAMPLE = 20
+
+    FRAMERATE = 20.0
+    SPEC_LEVELS_MIN = -10
+    SPEC_LEVELS_MAX = 150
+    DEFAULT_POWER_THRESHOLD = 500
+    MAX_POWER_THRESHOLD = 5000
+    DETECTION_CROSSINGS_PER_CHUNK = 20
 
     DETECTION_WINDOW = 0.1  # seconds
     DETECTION_BUFFER = 0.3  # seconds
     MIN_POWER_THRESHOLD = 1
-    DEFAULT_POWER_THRESHOLD = 20
-    MAX_POWER_THRESHOLD = 100
-    DETECTION_CROSSINGS_PER_CHUNK = 20
 
-    PLOT_DURATION = 5.0
+    PLOT_DURATION = 4.0
 
     @classmethod
     def get(cls, key, otherwise=None):
@@ -42,5 +49,3 @@ class Settings(object):
         qsettings.setValue(key, val)
         qsettings.sync()
         setattr(cls, key, val)
-        
-

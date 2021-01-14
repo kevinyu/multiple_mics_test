@@ -38,6 +38,8 @@ class MicrophoneListener(QObject):
 
 
 class SoundDetector(MicrophoneListener):
+    """Detects sound by looking at number of times the signal crosses a given threshold value
+    """
 
     def __init__(self, size, parent=None):
         super(SoundDetector, self).__init__(parent)
@@ -48,6 +50,13 @@ class SoundDetector(MicrophoneListener):
     def reset(self):
         self._buffer.clear()
         self._channels = None
+
+    @pyqtSlot(int)
+    def set_sampling_rate(self, sampling_rate):
+        self._buffer.clear()
+        self._buffer = RingBuffer(
+            maxlen=int(Settings.DETECTION_BUFFER * sampling_rate)
+        )
 
     def set_threshold(self, ch, threshold):
         self.thresholds[ch] = threshold
@@ -70,6 +79,7 @@ class SoundDetector(MicrophoneListener):
         for ch_idx in range(dat.shape[1]):
             if ch_idx not in self.thresholds:
                 self.thresholds[ch_idx] = Settings.DEFAULT_POWER_THRESHOLD
+
             threshold_crossings = np.nonzero(
                 np.diff(np.abs(dat[:, ch_idx]) > self.thresholds[ch_idx])
             )[0]
@@ -146,6 +156,17 @@ class SoundSaver(MicrophoneListener):
         self._recording = False
         self._trigger_timer = None
 
+    @pyqtSlot(int)
+    def set_sampling_rate(self, sampling_rate):
+        self.sampling_rate = sampling_rate
+        self._buffer.clear()
+        if self.triggered:
+            self._buffer = RingBuffer(
+                maxlen=int(Settings.DETECTION_BUFFER * self.sampling_rate)
+            )
+        else:
+            self._buffer = RingBuffer()
+
     @pyqtSlot()
     def trigger(self):
         self.start_rec()
@@ -155,7 +176,7 @@ class SoundSaver(MicrophoneListener):
         self._buffer.clear()
         if self.triggered:
             self._buffer = RingBuffer(
-                maxlen=int(Settings.DETECTION_BUFFER * Settings.RATE)
+                maxlen=int(Settings.DETECTION_BUFFER * self.sampling_rate)
             )
         else:
             self._buffer = RingBuffer()
@@ -224,8 +245,7 @@ class SoundSaver(MicrophoneListener):
                 folder_path = os.path.join(self.path, folder_name)
                 if not os.path.exists(folder_path):
                     os.makedirs(folder_path)
-                    print("\nSaving file to {}\n".format(folder_path))
-
+                print("Saving file to {}".format(folder_path))
                 if Settings.FILENAME_SUFFIX == "time":
                     filename_str = filename_format.format(time_str)
                     path = os.path.join(folder_path, filename_str)
