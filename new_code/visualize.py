@@ -1,4 +1,5 @@
 import os
+import time
 from collections.abc import Iterable
 
 
@@ -52,4 +53,37 @@ class Powerbar(object):
 
     def print(self, end="\r"):
         size = os.get_terminal_size()
-        print(self.to_string(size.columns - 1), end="\r")
+        print(" " + self.to_string(size.columns - 2), end="\r")
+
+
+class DetectionsPowerbar(Powerbar):
+    """Displays mic signals on a single line as well as a detection indicator
+
+    The detection indicators turn on when set_detected(channel) is called
+    and decay after a pre-specified amount of time. This time is
+    controlled by the event loop but can also be run synchronously.
+    """
+    detection_symbols = {True: "⬤", False: "◯"}
+
+    def __init__(self, decay_time, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.decay_time = decay_time
+        self._detections = {}
+
+    def set_detected(self, channel):
+        self._detections[channel] = time.time()
+
+    def set_channels(self, channels):
+        super().set_channels(channels)
+        self._detections = dict((ch, None) for ch in self.channels)
+
+    def channel_to_string(self, channel, width):
+        bar_output = super().channel_to_string(channel, width - 3)
+
+        last_detection = self._detections.get(channel)
+        is_detected = (
+            last_detection is not None
+            and time.time() - last_detection < self.decay_time
+        )
+
+        return " {} {}".format(self.detection_symbols[is_detected], bar_output)

@@ -9,13 +9,17 @@ logger.addHandler(handler)
 
 
 class Signal(object):
-    def __init__(self):
+    def __init__(self, debug=False):
+        self._debug = debug
         self.callbacks = {}
 
     def emit(self, *args, **kwargs):
         """Send an event to Signal's registered callbacks"""
         for id_ in self.callbacks:
-            callback = self.callbacks[id_]()
+            # callback = self.callbacks[id_]()
+            callback = self.callbacks[id_]
+            if self._debug:
+                print("DEBUG Signal: {} {} {}".format(callback, args, kwargs))
             if callback is not None:
                 try:
                     callback(*args, **kwargs)
@@ -28,7 +32,8 @@ class Signal(object):
     def connect(self, callback):
         """Register a callback to be called when signal is emitted"""
         id_ = id(callback)
-        self.callbacks[id_] = weakref.ref(callback)
+        # self.callbacks[id_] = weakref.ref(callback)
+        self.callbacks[id_] = callback
 
     def disconnect(self, callback):
         id_ = id(callback)
