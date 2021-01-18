@@ -16,6 +16,11 @@ class Powerbar(object):
         self.max_value = max_value
 
     def set_channels(self, channels):
+        try:
+            channels = int(channels)
+        except:
+            pass
+
         if isinstance(channels, int):
             self.channels = range(channels)
         else:

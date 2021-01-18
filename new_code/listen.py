@@ -66,6 +66,12 @@ class FilteredMicrophone(object):
             data = filter.apply(data)
         self.REC.emit(data)
 
+    def __getattr__(self, key):
+        if key not in self.__dict__:
+            return getattr(self.mic, key)
+        else:
+            return super().__getattr__(key)
+
 
 class Microphone(object):
     """Stream audio data to a signal
@@ -175,21 +181,6 @@ class Microphone(object):
                 self.REC.emit(chunk)
 
 
-class StreamManager(object):
-    """Manages a stream"""
-    def __init__(self, mic, detector):
-        self.mic = mic
-        self.detector = detector
-
-    def apply_config(self, config):
-        # Apply proper gain to filter
-        # Hook up a saver
-        # Set up detector params
-        # 
-        pass
-        
-
-
 class SoundDetector(object):
     """Emits DETECTED signal when sound crosses a given amplitude threshold
 
@@ -201,12 +192,15 @@ class SoundDetector(object):
         Map channel index to detection threshold. Channels not defined
         in this mapping will use a default threshold value.
     """
+    DEFAULT_DETECTION_WINDOW = 0.1
+    DEFAULT_THRESHOLD = 500.0
+    DEFAULT_CROSSINGS_THRESHOLD = 20
 
     def __init__(
             self,
-            detection_window: float,
-            default_threshold: float,
-            crossings_threshold: int,
+            detection_window: float=DEFAULT_DETECTION_WINDOW,
+            default_threshold: float=DEFAULT_THRESHOLD,
+            crossings_threshold: int=DEFAULT_CROSSINGS_THRESHOLD,
             ):
         """Create a detector for threshold crossings
 
@@ -226,9 +220,18 @@ class SoundDetector(object):
         self.default_threshold = default_threshold
         self.crossings_threshold = crossings_threshold
 
+        self._sampling_rate = None
         self.reset()
 
         self.DETECTED = Signal()
+
+    def apply_config(self, config):
+        self.detection_window = config.get("detection_window", self.detection_window)
+        self.default_threshold = config.get("default_threshold", self.default_threshold)
+        self.crossings_threshold = config.get("crossings_threshold", self.crossings_threshold)
+        self.threshold = {}
+        if self._sampling_rate is not None:
+            self.set_sampling_rate(self._sampling_rate)
 
     def reset(self):
         self._buffer.clear()
@@ -236,6 +239,7 @@ class SoundDetector(object):
         self.thresholds = {}
 
     def set_sampling_rate(self, sampling_rate):
+        self._sampling_rate = sampling_rate
         self._buffer = RingBuffer(maxlen=int(self.detection_window * sampling_rate))
 
     def set_channel_threshold(self, channel, threshold):
@@ -266,8 +270,8 @@ class SoundDetector(object):
                 self.DETECTED.emit(ch_idx)
 
 
-class SoundSaver(object):
-    """A triggered sound saver
+class SoundCollector(object):
+    """Collect data via trigger and emit signal when data is ready to be saved
     """
     DEFAULT_MIN_FILE_DURATION = 1.0
     DEFAULT_MAX_FILE_DURATION = 30.0
@@ -280,13 +284,13 @@ class SoundSaver(object):
             max_file_duration=DEFAULT_MAX_FILE_DURATION,
             buffer_duration=DEFAULT_BUFFER_DURATION,
             ):
-        """Initialize a SoundSaver instance and buffers
+        """Initialize a SoundCollector instance and buffers
 
         Params
         ======
         sampling_rate : int
-            Sampling rate - if None SoundSaver instance will be inactive.
-            Update with SoundSaver.set_sampling_rate()
+            Sampling rate - if None SoundCollector instance will be inactive.
+            Update with SoundCollector.set_sampling_rate()
         max_file_duration : float
             Maximum file length in seconds. Provides a safeguard to
             triggers set too low where saving is constantly on. Acutal
@@ -317,6 +321,12 @@ class SoundSaver(object):
         self.SAVE_READY = Signal()
         self.RECORDING = Signal()
 
+    def apply_config(self, config):
+        self.min_file_duration = config.get("min_file_duration", self.min_file_duration)
+        self.max_file_duration = config.get("max_file_duration", self.max_file_duration)
+        self.buffer_duration = config.get("buffer_duration", self.buffer_duration)
+        self.set_sampling_rate(self.sampling_rate)
+
     def set_sampling_rate(self, sampling_rate):
         if sampling_rate is None:
             self.sampling_rate = None
@@ -331,8 +341,11 @@ class SoundSaver(object):
             self._buffer = RingBuffer(maxlen=int(self.buffer_duration * self.sampling_rate))
             self._save_buffer = RingBuffer(maxlen=int(self.max_file_length))
 
-    def trigger(self):
-        """Initiates the saving of a file"""
+    def trigger(self, *args, **kwargs):
+        """Initiates the saving of a file
+
+        Silently consumes any arguments passed to it from the caller
+        """
         loop = asyncio.get_running_loop()
 
         if self._trigger_timer:
@@ -368,13 +381,15 @@ class SoundSaver(object):
 
             if (len(self._save_buffer) / self.sampling_rate) >= self.max_file_length:
                 data = np.array(self._save_buffer)
-                self.SAVE_READY.emit(data)
+                self.SAVE_READY.emit(data, self.sampling_rate)
                 self._save_buffer.clear()
         else:
             data_to_save = np.array(self._save_buffer)
             if not self.min_file_length or len(data_to_save) > self.min_file_length:
-                self.SAVE_READY.emit(data_to_save)
+                self.SAVE_READY.emit(data_to_save, self.sampling_rate)
             self._save_buffer.clear()
+
+
 
 
 

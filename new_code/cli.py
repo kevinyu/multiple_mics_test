@@ -10,11 +10,12 @@ def cli():
 
 @click.command()
 @click.argument("device_index", type=int)
-def debug(device_index):
+@click.argument("channels", type=int, default=1)
+def debug(device_index, channels):
     """Entrypoint into test application
     """
-    from app import example_app
-    example_app(device_index)
+    from app import example_app, example_app_1
+    example_app(device_index, channels)
 
 
 @click.command()
