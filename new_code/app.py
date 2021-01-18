@@ -50,6 +50,7 @@ async def main_detection(device_index):
 
     pb = DetectionsPowerbar(decay_time=0.2, max_value=1e4, channels=2)
     mic = Microphone(device_index=device_index)
+    gain_filter = GainFilter({i: 20 for i in range(channels)})
     detector = SoundDetector(
         detection_window=0.3,
         default_threshold=1000,
@@ -66,7 +67,6 @@ async def main_detection(device_index):
         pb.set_channels(setup_dict["n_channels"])
         detector.set_sampling_rate(setup_dict["rate"])
 
-    gain_filter = GainFilter({i: 20 for i in range(channels)})
     filtered_mic = mic.apply(gain_filter)
 
     mic.SETUP.connect(configure)
@@ -118,7 +118,7 @@ async def main_savefn(device_index):
     filtered_mic.REC.connect(saver.receive_data)
     detector.DETECTED.connect(pb.set_detected)
     detector.DETECTED.connect(lambda x: saver.trigger())
-    # saver.SAVE_READY.connect(print)
+    saver.SAVE_READY.connect(print)
 
     mic.set_channels(channels)
 

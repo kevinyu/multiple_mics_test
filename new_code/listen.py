@@ -7,7 +7,7 @@ import sounddevice as sd
 
 from configure_logging import handler
 from events import Signal
-from buffer import Buffer
+from ringbuffer import RingBuffer
 from utils import db_scale
 
 
@@ -28,8 +28,18 @@ class Filter(object):
 
 
 class GainFilter(Filter):
+    """A filter that applies gain in dB per channel
+
+    Config
+    ======
+    channel_gains: dict
+        Dict mapping channel index to gain value
+    """
     def __init__(self, channel_gains: dict):
         self.channel_gains = channel_gains
+
+    def configure(self, config):
+        pass
 
     def apply(self, data):
         for i in self.channel_gains:
@@ -58,7 +68,14 @@ class FilteredMicrophone(object):
 
 
 class Microphone(object):
-    """Stream audio data to a signal"""
+    """Stream audio data to a signal
+
+    Config
+    ======
+    device_index: int
+    device_name: str
+    channels: int
+    """
 
     def __init__(self, device_index=None, device_name=None):
         if device_index is None and device_name is None:
@@ -158,10 +175,31 @@ class Microphone(object):
                 self.REC.emit(chunk)
 
 
+class StreamManager(object):
+    """Manages a stream"""
+    def __init__(self, mic, detector):
+        self.mic = mic
+        self.detector = detector
+
+    def apply_config(self, config):
+        # Apply proper gain to filter
+        # Hook up a saver
+        # Set up detector params
+        # 
+        pass
+        
+
+
 class SoundDetector(object):
     """Emits DETECTED signal when sound crosses a given amplitude threshold
 
     Emits the channel indexes that the sound was detected on
+
+    Config
+    ======
+    thresholds: dict
+        Map channel index to detection threshold. Channels not defined
+        in this mapping will use a default threshold value.
     """
 
     def __init__(
@@ -174,15 +212,16 @@ class SoundDetector(object):
 
         Parameters
         ==========
-        threshold : float
-            Amplitude threshold
         crossings_threshold : float
             Emit detection signal when the number of threshold crossings
             surpasses this value
+        default_threshold : float
+            Default amplitude threshold value to use when threshold for
+            a channel is not explicitly set
         detection_window : float
             Window size in seconds to count threshold crossings in
         """
-        self._buffer = Buffer(maxlen=0)
+        self._buffer = RingBuffer()
         self.detection_window = detection_window
         self.default_threshold = default_threshold
         self.crossings_threshold = crossings_threshold
@@ -193,13 +232,11 @@ class SoundDetector(object):
 
     def reset(self):
         self._buffer.clear()
+        # Thresholds will be set to default the first time they are accessed
         self.thresholds = {}
 
     def set_sampling_rate(self, sampling_rate):
-        self._buffer.clear()
-        self._buffer = Buffer(
-            maxlen=int(self.detection_window * sampling_rate)
-        )
+        self._buffer = RingBuffer(maxlen=int(self.detection_window * sampling_rate))
 
     def set_channel_threshold(self, channel, threshold):
         self.thresholds[channel] = threshold
@@ -215,6 +252,7 @@ class SoundDetector(object):
             return
 
         for ch_idx in range(dat.shape[1]):
+            # Thresholds get set here if they are missing
             if ch_idx not in self.thresholds:
                 self.thresholds[ch_idx] = self.default_threshold
 
@@ -228,42 +266,52 @@ class SoundDetector(object):
                 self.DETECTED.emit(ch_idx)
 
 
-###
-#
-
-
-
 class SoundSaver(object):
-    """
+    """A triggered sound saver
     """
     DEFAULT_MIN_FILE_DURATION = 1.0
     DEFAULT_MAX_FILE_DURATION = 30.0
-    TRIGGER_DECAY_TIME = 0.2
+    DEFAULT_BUFFER_DURATION = 0.2
 
     def __init__(
             self,
             sampling_rate=None,
             min_file_duration=DEFAULT_MIN_FILE_DURATION,
             max_file_duration=DEFAULT_MAX_FILE_DURATION,
+            buffer_duration=DEFAULT_BUFFER_DURATION,
             ):
-        """
+        """Initialize a SoundSaver instance and buffers
 
-        max_file_duration : int
-            Maximum file length in seocnds. Provides a safeguard to
+        Params
+        ======
+        sampling_rate : int
+            Sampling rate - if None SoundSaver instance will be inactive.
+            Update with SoundSaver.set_sampling_rate()
+        max_file_duration : float
+            Maximum file length in seconds. Provides a safeguard to
             triggers set too low where saving is constantly on. Acutal
             file size depends on the sampling rate.
+        min_file_duration : float
+            Minimum file length in seconds. Do not emit save events
+            for sound periods shorter than this length
+        buffer_duration : float (default = 0.2)
+            How many seconds before and after the triggered period
+            to capture. This determines the buffer length as well as
+            the amount of silence needed to turn a triggered recording off.
+            Each call to trigger() resets this timer.
         """
         self.status = {
             "recording": False,
             "ready": False,
         }
 
-        self._buffer = None
-        self._save_buffer = Buffer()
-        self._trigger_timer = Buffer()
+        self._buffer = RingBuffer()
+        self._save_buffer = RingBuffer()
+        self._trigger_timer = None
 
         self.min_file_duration = min_file_duration
         self.max_file_duration = max_file_duration
+        self.buffer_duration = buffer_duration
         self.set_sampling_rate(sampling_rate)
 
         self.SAVE_READY = Signal()
@@ -280,8 +328,8 @@ class SoundSaver(object):
             self.min_file_length = int(self.min_file_duration * self.sampling_rate)
             self.max_file_length = int(self.max_file_duration * self.sampling_rate)
             self.status["ready"] = True
-            self._buffer = Buffer(maxlen=int(self.TRIGGER_DECAY_TIME * self.sampling_rate))
-            self._save_buffer = Buffer(maxlen=int(self.max_file_length))
+            self._buffer = RingBuffer(maxlen=int(self.buffer_duration * self.sampling_rate))
+            self._save_buffer = RingBuffer(maxlen=int(self.max_file_length))
 
     def trigger(self):
         """Initiates the saving of a file"""
@@ -294,7 +342,7 @@ class SoundSaver(object):
             self.RECORDING.emit(True)
 
         self._trigger_timer = loop.call_later(
-            self.TRIGGER_DECAY_TIME,
+            self.buffer_duration,
             self.stop_recording,
         )
         self.status["recording"] = True
@@ -329,44 +377,194 @@ class SoundSaver(object):
             self._save_buffer.clear()
 
 
-        start_time = datetime.datetime.now() - datetime.timedelta(seconds=len(data) / Settings.RATE)
-        time_str = datetime2str(start_time)
 
-        if Settings.SAVE_CHANNELS_SEPARATELY and isinstance(self.channel_folders, list) and isinstance(self.filename_format, list):
-            for channel, folder_name, filename_format in zip(range(self._channels), self.channel_folders, self.filename_format):
-                folder_path = os.path.join(self.path, folder_name)
-                if not os.path.exists(folder_path):
-                    os.makedirs(folder_path)
-                print("Saving file to {}".format(folder_path))
-                if Settings.FILENAME_SUFFIX == "time":
-                    filename_str = filename_format.format(time_str)
-                    path = os.path.join(folder_path, filename_str)
-                else:
-                    filename_str = filename_format.format(self._file_idx[channel])
-                    path = os.path.join(folder_path, filename_str)
-                    while os.path.exists(path):
-                        self._file_idx[channel] += 1
-                        filename_str = filename_format.format(self._file_idx[channel])
-                        path = os.path.join(folder_path, filename_str)
-                self.SAVE_EVENT.emit(path)
-                scipy.io.wavfile.write(path, self.sampling_rate, data.astype(Settings.DTYPE)[:, channel])
-        elif not Settings.SAVE_CHANNELS_SEPARATELY:
-            folder_path = self.path
-            filename_format = self.filename_format
-            channel = None
-
-            if Settings.FILENAME_SUFFIX == "time":
-                filename_str = filename_format.format(time_str)
-                path = os.path.join(folder_path, filename_str)
-            else:
-                filename_str = filename_format.format(self._file_idx[channel])
-                path = os.path.join(folder_path, filename_str)
-                while os.path.exists(path):
-                    self._file_idx[channel] += 1
-                    filename_str = filename_format.format(self._file_idx[channel])
-                    path = os.path.join(folder_path, filename_str)
-
-            self.SAVE_EVENT.emit(path)
-            scipy.io.wavfile.write(path, self.sampling_rate, data.astype(Settings.DTYPE))
-        else:
-            raise Exception("When SAVE_CHANNELS_SEPARATELY is on, need channel_folders and filename_format to be lists")
+#
+# class SoundSaver(MicrophoneListener):
+#
+#     SAVE_EVENT = Signal()
+#     RECORDING = Signal()
+#
+#     def __init__(
+#             self,
+#             size,
+#             path,
+#             triggered=False,
+#             saving=False,
+#             channel_folders=None,
+#             min_size=None,
+#             parent=None
+#             ):
+#         """
+#         Parameters
+#         ----------
+#         size : int
+#             Size of each file to be saved in samples
+#         """
+#         super(SoundSaver, self).__init__(parent)
+#         self._buffer = RingBuffer()
+#         self._save_buffer = RingBuffer()
+#         self._idx = 0
+#         self.path = path
+#         self.saving = saving
+#         self.channel_folders = channel_folders
+#         self.triggered = triggered
+#         self.min_size = min_size
+#         self.sampling_rate = sampling_rate
+#         self.filename_format = filename_format
+#         self._file_idx = collections.defaultdict(int)
+#         self.size = size
+#         self._recording = False
+#         self._trigger_timer = None
+#
+#         # self._trigger_timer.start(0.1)
+#
+#     def check_timer(self):
+#         """Prepare to stop recording
+#         """
+#
+#     def start_rec(self):
+#         if self._trigger_timer:
+#             self._trigger_timer.stop()
+#             self._trigger_timer.deleteLater()
+#         else:
+#             self.RECORDING.emit(True)
+#
+#         self._trigger_timer = QTimer(self)
+#         self._trigger_timer.timeout.connect(self.stop_rec)
+#         self._trigger_timer.setSingleShot(True)
+#         self._trigger_timer.start(Settings.DETECTION_BUFFER * 1000)
+#         self._recording = True
+#         self._channels = None
+#
+#     def reset(self):
+#         self._buffer.clear()
+#         self._save_buffer.clear()
+#         self._channels = None
+#
+#     def stop_rec(self):
+#         self.RECORDING.emit(False)
+#         self._recording = False
+#         self._trigger_timer = None
+#
+#     @pyqtSlot(int)
+#     def set_sampling_rate(self, sampling_rate):
+#         self.sampling_rate = sampling_rate
+#         self._buffer.clear()
+#         if self.triggered:
+#             self._buffer = RingBuffer(
+#                 maxlen=int(Settings.DETECTION_BUFFER * self.sampling_rate)
+#             )
+#         else:
+#             self._buffer = RingBuffer()
+#
+#     @pyqtSlot()
+#     def trigger(self):
+#         self.start_rec()
+#
+#     def set_triggered(self, triggered):
+#         self.triggered = triggered
+#         self._buffer.clear()
+#         if self.triggered:
+#             self._buffer = RingBuffer(
+#                 maxlen=int(Settings.DETECTION_BUFFER * self.sampling_rate)
+#             )
+#         else:
+#             self._buffer = RingBuffer()
+#
+#     def set_saving(self, saving):
+#         self.saving = saving
+#
+#     @pyqtSlot(object)
+#     def receive_data(self, data):
+#         if self._channels is None:
+#             self._channels = data.shape[1]
+#
+#         if data.shape[1] != self._channels:
+#             self._buffer.clear()
+#             self._save_buffer.clear()
+#             return
+#
+#         if not self.saving:
+#             self._buffer.clear()
+#             self._save_buffer.clear()
+#             return
+#
+#         self._buffer.extend(data)
+#
+#         if not self.triggered:
+#             if len(self._buffer) > self.size:
+#                 data = np.array(self._buffer)
+#                 self._save(data[:self.size])
+#                 self._buffer.clear()
+#                 self._buffer.extend(data[self.size:])
+#
+#         if self.triggered:
+#             if self._recording:
+#                 if not len(self._save_buffer):
+#                     self._save_buffer.extend(self._buffer)
+#                 else:
+#                     self._save_buffer.extend(data)
+#
+#                 if (len(self._save_buffer) / Settings.RATE) >= Settings.MAX_TRIGGERED_DURATION:
+#                     data = np.array(self._save_buffer)
+#                     self._save(data)
+#                     self._save_buffer.clear()
+#             else:
+#                 data_to_save = np.array(self._save_buffer)
+#                 if not self.min_size or len(data_to_save) > self.min_size:
+#                     self._save(data_to_save)
+#                 self._save_buffer.clear()
+#
+#     def _save(self, data):
+#         if not self.saving:
+#             return
+#
+#         if not self.path:
+#             print("Warning: No path is configured")
+#             return
+#
+#         if not os.path.exists(self.path):
+#             print("Warning: {} does not exist".format(self.path))
+#             return
+#
+#         start_time = datetime.datetime.now() - datetime.timedelta(seconds=len(data) / Settings.RATE)
+#         time_str = datetime2str(start_time)
+#
+#         if Settings.SAVE_CHANNELS_SEPARATELY and isinstance(self.channel_folders, list) and isinstance(self.filename_format, list):
+#             for channel, folder_name, filename_format in zip(range(self._channels), self.channel_folders, self.filename_format):
+#                 folder_path = os.path.join(self.path, folder_name)
+#                 if not os.path.exists(folder_path):
+#                     os.makedirs(folder_path)
+#                 print("Saving file to {}".format(folder_path))
+#                 if Settings.FILENAME_SUFFIX == "time":
+#                     filename_str = filename_format.format(time_str)
+#                     path = os.path.join(folder_path, filename_str)
+#                 else:
+#                     filename_str = filename_format.format(self._file_idx[channel])
+#                     path = os.path.join(folder_path, filename_str)
+#                     while os.path.exists(path):
+#                         self._file_idx[channel] += 1
+#                         filename_str = filename_format.format(self._file_idx[channel])
+#                         path = os.path.join(folder_path, filename_str)
+#                 self.SAVE_EVENT.emit(path)
+#                 scipy.io.wavfile.write(path, self.sampling_rate, data.astype(Settings.DTYPE)[:, channel])
+#         elif not Settings.SAVE_CHANNELS_SEPARATELY:
+#             folder_path = self.path
+#             filename_format = self.filename_format
+#             channel = None
+#
+#             if Settings.FILENAME_SUFFIX == "time":
+#                 filename_str = filename_format.format(time_str)
+#                 path = os.path.join(folder_path, filename_str)
+#             else:
+#                 filename_str = filename_format.format(self._file_idx[channel])
+#                 path = os.path.join(folder_path, filename_str)
+#                 while os.path.exists(path):
+#                     self._file_idx[channel] += 1
+#                     filename_str = filename_format.format(self._file_idx[channel])
+#                     path = os.path.join(folder_path, filename_str)
+#
+#             self.SAVE_EVENT.emit(path)
+#             scipy.io.wavfile.write(path, self.sampling_rate, data.astype(Settings.DTYPE))
+#         else:
+#             raise Exception("When SAVE_CHANNELS_SEPARATELY is on, need channel_folders and filename_format to be lists")
