@@ -71,12 +71,17 @@ class DetectionsPowerbar(Powerbar):
     detection_symbols = {True: "⬤", False: "◯"}
 
     def __init__(self, decay_time, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.decay_time = decay_time
         self._detections = {}
+        self.decay_time = decay_time
+        super().__init__(*args, **kwargs)
 
-    def set_detected(self, channel):
-        self._detections[channel] = time.time()
+    def set_detected(self, channel, *args, **kwargs):
+        now = time.time()
+        if channel is None:
+            for ch in self._detections:
+                self._detections[ch] = now
+        else:
+            self._detections[channel] = now
 
     def set_channels(self, channels):
         super().set_channels(channels)

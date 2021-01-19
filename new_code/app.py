@@ -6,15 +6,15 @@ from functools import partial
 
 import numpy as np
 import scipy.io.wavfile
+import yaml
 
 from configure_logging import handler
 from events import Signal
 from listen import (
     Microphone,
     SoundDetector,
-    GainFilter,
-    SoundCollector,
-    FilteredMicrophone,
+    ContinuousSoundCollector,
+    TriggeredSoundCollector,
 )
 from visualize import Powerbar, DetectionsPowerbar
 from utils import db_scale
@@ -202,20 +202,7 @@ class Pathfinder(object):
 class StreamManager(object):
     """Manages a stream with a gain, detection, and saving settings
 
-    Config Example
-    ==============
-    gain: 10
-    channel: 1
-    name: "Subject1"
-    save:
-        min_file_duration: 1.0
-        max_file_duration: 10.0
-        buffer_duration: 0.2
-        base_dir: "/data"
-        subdirectories: ["{name}", "{date}", "{hour}"]
-        filename_format: "{name}_{timestamp}"
-    detect:
-        threshold: 1000.0
+    Links up a microphone to a gain filter, and saves file to a stream.
     """
     def __init__(self, mic):
         self.mic = mic
@@ -230,11 +217,18 @@ class StreamManager(object):
 
         # Setup signals
         self.mic.REC.connect(self._filter)
-        self.OUT = Signal()
+        self.OUT = Signal()  # Launder the REC signal with the stream's gain
+
+    def stop(self):
+        self.mic.REC.disconnect(self._filter)
+        self.mic.SETUP.disconnect(self.on_mic_setup)
 
     def _filter(self, data):
-        out_data = db_scale(data[:, self.channel], self.gain)
-        self.OUT.emit(data)
+        # The db_scale function enforces dtype consistency but it can't hurt to
+        # double check...
+        original_dtype = data.dtype
+        out_data = db_scale(data[:, self.channel], self.gain)[:, None]
+        self.OUT.emit(out_data.astype(original_dtype))
 
     def apply_config(self, config):
         self.gain = config.get("gain", 0)
@@ -243,7 +237,10 @@ class StreamManager(object):
         if self.channel is None:
             raise ValueError("Stream must specific a channel index")
 
-        self.collector = SoundCollector()
+        if config.get("save", {}).get("triggered"):
+            self.collector = TriggeredSoundCollector()
+        else:
+            self.collector = ContinuousSoundCollector()
         self.collector.apply_config(config.get("save", {}))
 
         self.saver = Pathfinder()
@@ -272,6 +269,8 @@ class StreamManager(object):
         )
         save_dir, filename = self.saver.get_dir_and_filename(self.name, file_timestamp)
 
+        filename = "{}.wav".format(filename)
+
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
@@ -286,59 +285,73 @@ class StreamManager(object):
         ))
         scipy.io.wavfile.write(full_path, sampling_rate, data)
 
-# class SynchronizedStreamManager(object):
-#     def __init__(self, mic):
-#         self.mic = mic
-#         self,detectors_per_channel = {}
-#         self.saver = None
-#
-#         self.gain_per_channel = {}
-#         self._is_configured = False
-#
-#         # Setup signals
-#         self.mic.REC.connect(self._filter)
-#         self.OUT = Signal()
-#
-#     def _filter(self, data):
-#         for i in range(data.shape[1]):
-#             data[:, i] = db_scale(data[:, i], self.gain_per_channel.get(i, 0))
-#         self.OUT.emit(data)
-#
-#     def apply_config(self, config):
-#         # Config contains the info on each stream
-#         self.saver = SoundSaver()
-#         self.saver.apply_config(config.get("saving", {}))
-#
-#         for stream_config in config["streams"]:
-#             channel = stream_config["channel"]
-#             if channel in self.gain_per_channel:
-#                 raise ValueError("Configuration has repeated channel")
-#
-#             stream_detector = SoundDetector()
-#             stream_detector.apply_config(stream_config.get("detection"), {})
-#
-#             self.detectors_per_channel[channel] = stream_detector
-#             self.gain_per_channel[channel] = stream_config.get("gain", 0)
-#             self.channels.append(channel)
-#
-#         # Hookup events
-#         self.mic.SETUP.connect(self.on_mic_setup)
-#         self.OUT.connect(self.saver.receive_data)
-#         for detector in self.detectors_per_channel.value():
-#             self.OUT.connect(detector.receive_data)
-#             detector.DETECTED.connect(self.saver.trigger())
-#
-#         self.channels = sorted(self.channels)
-#         self._is_configured = True
-#
-#     def on_mic_setup(self, setup_dict):
-#         self.saver.set_sampling_rate(setup_dict["rate"])
-#         for detector in self.detectors_per_channel.value():
-#             ddetector.set_sampling_rate(setup_dict["rate"])
-#
-#     def save_data(self, data):
-#         pass
 
+class SynchronizedStreamManager(StreamManager):
+
+    def __init__(self, mic):
+        self.mic = mic
+        self.saver = None
+        self.collector = None
+        self.detector = None
+
+        # These channels are more like "streams" since they can duplicate channels
+        self.stream_channels = []  # Channel indexes per stream
+        self.name_per_stream = []  # Name of each stream
+        self.gain_per_stream = np.array([])  # Gain of each stream
+
+        self._is_configured = False
+
+        # Setup signals
+        self.mic.REC.connect(self._filter)
+        self.OUT = Signal()  # Launder the REC signal with the stream's gain
+
+    @property
+    def name(self):
+        name_parts = []
+        for i, name in enumerate(self.name_per_stream):
+            name_parts.append("{}_{}".format(i, name))
+        return "__".join(name_parts)
+
+    def _filter(self, data):
+        # The db_scale function enforces dtype consistency but it can't hurt to
+        # double check...
+        original_dtype = data.dtype
+        out_data = db_scale(data[:, self.stream_channels], self.gain_per_stream)
+        self.OUT.emit(out_data.astype(original_dtype))
+
+    def apply_config(self, config):
+        streams = config.get("streams", [])
+        self.stream_channels = []
+        self.name_per_stream = []
+        self.gain_per_stream = np.zeros(len(streams))
+
+        for i, stream in enumerate(streams):
+            if stream.get("channel") is None:
+                raise ValueError("Stream at index {} must specific a channel index".format(i))
+            self.stream_channels.append(stream["channel"])
+            self.name_per_stream.append(stream.get("name", "Ch{}".format(stream["channel"])))
+            self.gain_per_stream[i] = stream.get("gain", 0)
+
+        if config.get("save", {}).get("triggered"):
+            self.collector = TriggeredSoundCollector()
+        else:
+            self.collector = ContinuousSoundCollector()
+        self.collector.apply_config(config.get("save", {}))
+
+        self.saver = Pathfinder()
+        self.saver.apply_config(config.get("save", {}))
+
+        self.detector = SoundDetector()
+        self.detector.apply_config(config.get("detect", {}))
+
+        # Link up signals
+        self.mic.SETUP.connect(self.on_mic_setup)
+        self.OUT.connect(self.collector.receive_data)
+        self.OUT.connect(self.detector.receive_data)
+        self.detector.DETECTED.connect(self.collector.trigger)
+        self.collector.SAVE_READY.connect(self.save_data)
+
+        self._is_configured = True
 
 
 class CoreApp(object):
@@ -346,35 +359,60 @@ class CoreApp(object):
     """
     def __init__(self, config):
         # The mic must be instantiated within the main asyncio loop coroutine!
-        pass
+        self._config = config
 
     def apply_config(self, config):
-        device_index = config.get("device_index")
+        device_name = config.get("device_name")
         streams = config.get("streams", [])
 
-        self.mic = Microphone(device_index=device_index)
+        # Apply defaults
+        for stream in streams:
+            if "gain" not in stream:
+                stream["gain"] = config.get("gain")
+            for key, val in config.get("save", {}).items():
+                if key not in stream.get("save", {}):
+                    if "save" not in stream:
+                        stream["save"] = {}
+                    stream["save"][key] = val
+            for key, val in config.get("detect", {}).items():
+                if key not in stream.get("detect", {}):
+                    if "detect" not in stream:
+                        stream["detect"] = {}
+                    stream["detect"][key] = val
+
+        self.mic = Microphone(device_name=device_name)
 
         channels = []
         for stream_config in streams:
             channels.append(stream_config["channel"])
 
-        self.pb = DetectionsPowerbar(decay_time=0.2, max_value=1e4, channels=channels)
-        for stream_config, channel in zip(streams, channels):
-            stream_manager = StreamManager(mic=self.mic)
-            stream_manager.apply_config(stream_config)
-            stream_manager.detector.DETECTED.connect(lambda ch: self.pb.set_detected(channel))
+        self.pb = DetectionsPowerbar(decay_time=0.2, max_value=1e4, channels=len(channels))
 
-        self.mic.REC.connect(self.echo)
-        self.mic.SETUP.connect(lambda setup_dict: self.pb.set_channels(setup_dict["n_channels"]))
-        self.mic.set_channels(np.max(channels) + 1)
+        if config["synchronized"] is True:
+            stream_manager = SynchronizedStreamManager(mic=self.mic)
+            stream_manager.apply_config(config)
+            stream_manager.detector.DETECTED.connect(partial(self.pb.set_detected, None))
+            stream_manager.OUT.connect(self.echo)
+        else:
+            for i, stream_config in enumerate(streams):
+                stream_manager = StreamManager(mic=self.mic)
+                stream_manager.apply_config(stream_config)
+                stream_manager.detector.DETECTED.connect(partial(self.pb.set_detected, i))
+                stream_manager.OUT.connect(partial(self.echo_channel, i))
+
+        self.mic.set_channels(channels)
 
     def echo(self, data):
         for i in range(data.shape[1]):
             self.pb.set_channel_value(i, np.max(np.abs(data[:, i])))
         self.pb.print()
 
-    async def run(self, config):
-        self.apply_config(config)
+    def echo_channel(self, i, data):
+        self.pb.set_channel_value(i, np.max(np.abs(data)))
+        self.pb.print()
+
+    async def run(self):
+        self.apply_config(self._config)
 
         try:
             await self.mic.run()
@@ -384,31 +422,9 @@ class CoreApp(object):
             self.mic.stop()
 
 
-
-
-config = {
-    "device_index": 6,
-    "streams": [
-        {
-            "channel": 0,
-            "gain": 20,
-            "name": "KevinsTest",
-            "save": {
-                "min_file_duration": 0.5,
-                "max_file_duration": 10.0,
-                "buffer_duration": 0.2,
-                "base_dir": "temp",
-                "subdirectories": ["{name}", "{date}"],
-                "filename_format": "{name}_{date}_{timestamp}"
-            },
-            "detect": {
-                "threshold": 1000.0
-            }
-        }
-    ]
-}
-
-
-def example_app(*args):
-    app = CoreApp(config)
-    asyncio.run(app.run(config))
+def example_app(config_file):
+    with open(config_file, "r") as yaml_config:
+        config = yaml.load(yaml_config)
+    print(config["devices"])
+    app = CoreApp(config["devices"][0])
+    asyncio.run(app.run())

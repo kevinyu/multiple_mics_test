@@ -199,7 +199,7 @@ class TestRingBuffer(unittest.TestCase):
         self.assertEqual(b.maxlen, 10)
         self.assertIs(b.n_channels, None)
         self.assertIs(b._init_n_channels, None)
-        self.assertEqual(b._ringbuffer.shape, (10, 0))
+        self.assertEqual(b._ringbuffer.shape, (10, 1), "The underlying ringbuffer array should not be affected until next write")
 
         b = RingBuffer(maxlen=10, n_channels=3)
         b.extend(np.ones((9, 3)))
@@ -211,3 +211,21 @@ class TestRingBuffer(unittest.TestCase):
         self.assertIs(b.n_channels, 3)
         self.assertIs(b._init_n_channels, 3)
         self.assertEqual(b._ringbuffer.shape, (10, 3))
+
+    def test_buffer_new_shape_after_clear(self):
+        """Test that arrays with a different number of channels can be extended after clearing"""
+        b = RingBuffer(maxlen=10)
+        self.assertEqual(b._ringbuffer.shape[1], 0)
+
+        b.extend(np.ones((4, 2)))
+        self.assertEqual(b._ringbuffer.shape[1], 2)
+
+        with self.assertRaises(ValueError):
+            # Mismatched channel numbers
+            b.extend(np.ones((4, 4)))
+
+        b.clear()
+        b.extend(np.ones((4, 4)))
+        self.assertEqual(b._ringbuffer.shape[1], 4)
+
+

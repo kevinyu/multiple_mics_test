@@ -1,0 +1,35 @@
+visual: cli  # can be none, qt, curses, line, scroll
+devices:
+  - device_name: pulse
+    gain: 10.0
+    synchronized: false
+
+    save:
+      triggered: true
+      min_file_duration: 2.0
+      max_file_duration: 10.0
+      buffer_duration: 0.5
+      base_dir: "temp"
+      subdirectories: ["{name}", "{date}", "{hour}"]
+      filename_format: "{name}_{timestamp}"
+
+    detect:
+      threshold: 1000.0
+
+    streams:
+      - channel: 0
+        name: Subject0
+
+      - channel: 1
+        name: Subject1
+        gain: 20.0
+        detect:
+          threshold: 5000.0
+        save:
+          min_file_duration: 1.0
+
+      - channel: 1
+        name: Subject1_nogain
+        gain: 0.0
+        detect:
+          threshold: 99999999

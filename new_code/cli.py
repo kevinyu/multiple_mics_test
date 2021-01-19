@@ -9,13 +9,12 @@ def cli():
 
 
 @click.command()
-@click.argument("device_index", type=int)
-@click.argument("channels", type=int, default=1)
-def debug(device_index, channels):
+@click.option("-c", "--config", type=click.Path(exists=True))
+def listen(config):
     """Entrypoint into test application
     """
-    from app import example_app, example_app_1
-    example_app(device_index, channels)
+    from app import example_app
+    example_app(config)
 
 
 @click.command()
@@ -31,7 +30,7 @@ def device_info(device_index):
     click.echo(pprint.pformat(sd.query_devices()[device_index], indent=4))
 
 
-cli.add_command(debug)
+cli.add_command(listen)
 cli.add_command(list_devices)
 cli.add_command(device_info)
 
