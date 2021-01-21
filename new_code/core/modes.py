@@ -1,0 +1,3 @@
+
+CONTINUOUS = "continuous"
+TRIGGERED = "triggered"

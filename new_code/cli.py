@@ -10,6 +10,15 @@ def cli():
 
 @click.command()
 @click.option("-c", "--config", type=click.Path(exists=True))
+def gui(config):
+    """Entrypoint into test application
+    """
+    from gui.main import run_app
+    run_app(config)
+
+
+@click.command()
+@click.option("-c", "--config", type=click.Path(exists=True))
 def listen(config):
     """Entrypoint into test application
     """
@@ -30,6 +39,7 @@ def device_info(device_index):
     click.echo(pprint.pformat(sd.query_devices()[device_index], indent=4))
 
 
+cli.add_command(gui)
 cli.add_command(listen)
 cli.add_command(list_devices)
 cli.add_command(device_info)

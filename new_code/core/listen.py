@@ -5,19 +5,20 @@ from functools import partial
 import numpy as np
 import sounddevice as sd
 
-from configure_logging import handler
-from events import Signal
-from ringbuffer import RingBuffer
-from utils import db_scale
+# from configure_logging import handler
+from core.events import Signal
+from core.modes import CONTINUOUS, TRIGGERED
+from core.ringbuffer import RingBuffer
+from core.utils import db_scale
 
 
 DTYPE = np.int16
 CHUNK = 1024
 DETECTION_BUFFER = 0.3
 
-
-logger = logging.getLogger(__name__)
-logger.addHandler(handler)
+#
+# logger = logging.getLogger(__name__)
+# logger.addHandler(handler)
 
 
 class Microphone(object):
@@ -43,6 +44,9 @@ class Microphone(object):
         self._stream = None
         self.mic_queue = asyncio.Queue()
 
+        self.setup_signals()
+
+    def setup_signals(self):
         self.REC = Signal()
         self.SETUP = Signal()
 
@@ -80,12 +84,10 @@ class Microphone(object):
         )
         return
 
-    async def run(self):
-        """Start an audio input stream and emit metadata
+    def reset_stream(self):
+        if self._stream:
+            self._stream.close()
 
-        By using a queue, we decouple the emission of events with the capturing
-        of audio data.
-        """
         device_info = sd.query_devices()[self.device_index]
         # Could the device name have changed by now?
         rate = int(device_info["default_samplerate"])
@@ -113,13 +115,19 @@ class Microphone(object):
         else:
             self._stream.start()
 
+    async def run(self):
+        """Start an audio input stream and emit metadata
+
+        By using a queue, we decouple the emission of events with the capturing
+        of audio data.
+        """
+        self.reset_stream()
         running = True
         while running:
             try:
                 chunk = await self.mic_queue.get()
             except:
                 running = False
-                raise
             else:
                 self.REC.emit(chunk)
 
@@ -170,8 +178,11 @@ class SoundDetector(object):
         if self._sampling_rate is not None:
             self.set_sampling_rate(self._sampling_rate)
 
-    def reset(self):
+    def clear(self):
         self._buffer.clear()
+
+    def reset(self):
+        self.clear()
         # Thresholds will be set to default the first time they are accessed
         self.thresholds = {}
 
@@ -279,13 +290,18 @@ class BaseSoundCollector(object):
         self.set_sampling_rate(self.sampling_rate)
 
     def set_sampling_rate(self, sampling_rate):
-        if sampling_rate is None:
-            self.sampling_rate = None
+        self.sampling_rate = sampling_rate
+        self.reset()
+
+    def clear(self):
+        self._save_buffer.clear()
+
+    def reset(self):
+        if self.sampling_rate is None:
             self.min_file_length = None
             self.max_file_length = None
             self.status["ready"] = False
         else:
-            self.sampling_rate = sampling_rate
             self.min_file_length = int(self.min_file_duration * self.sampling_rate)
             self.max_file_length = int(self.max_file_duration * self.sampling_rate)
             self.status["ready"] = True
@@ -356,3 +372,50 @@ class ContinuousSoundCollector(BaseSoundCollector):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.start_recording()
+
+
+class ToggledSoundCollector(BaseSoundCollector):
+    """Triggered sound collector that can be toggled into continuous mode"""
+
+    def __init__(self, is_triggered, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.mode = TRIGGERED if is_triggered else CONTINUOUS
+        if self.mode == CONTINUOUS:
+            self.start_recording()
+
+    def toggle(self, new_mode):
+        self.stop_recording()
+
+        if self.mode == new_mode:
+            return
+        else:
+            self.clear()
+            self.mode = new_mode
+
+        if self.mode == CONTINUOUS:
+            self.start_recording()
+
+    def trigger(self, *args, **kwargs):
+        """Initiate the recording of data
+
+        Silently consumes any arguments passed to it from the caller
+        """
+        if self.mode == TRIGGERED:
+            loop = asyncio.get_running_loop()
+
+            if self._trigger_timer:
+                self._trigger_timer.cancel()
+                self._trigger_timer = None
+
+            self._trigger_timer = loop.call_later(
+                self.buffer_duration,
+                self.stop_recording,
+            )
+            self.start_recording()
+
+    def stop_recording(self):
+        super().stop_recording()
+
+        if self._trigger_timer:
+            self._trigger_timer.cancel()
+            self._trigger_timer = None
