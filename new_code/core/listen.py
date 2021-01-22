@@ -1,15 +1,18 @@
 import asyncio
 import logging
 from functools import partial
-
+import queue
 import numpy as np
 import sounddevice as sd
+import time
 
 # from configure_logging import handler
-from core.events import Signal
+from core.events import AsyncSignal, Signal
 from core.modes import CONTINUOUS, TRIGGERED
 from core.ringbuffer import RingBuffer
 from core.utils import db_scale
+
+import threading
 
 
 DTYPE = np.int16
@@ -19,6 +22,9 @@ DETECTION_BUFFER = 0.3
 #
 # logger = logging.getLogger(__name__)
 # logger.addHandler(handler)
+
+def list_devices():
+    return sd.query_devices()
 
 
 class Microphone(object):
@@ -42,12 +48,13 @@ class Microphone(object):
             self.device_index = self._device_name_to_index(device_name)
         self.n_channels = 1
         self._stream = None
-        self.mic_queue = asyncio.Queue()
+        self.mic_queue = queue.Queue()
+        self._stop_mic_event = None
 
         self.setup_signals()
 
     def setup_signals(self):
-        self.REC = Signal()
+        self.REC = AsyncSignal()
         self.SETUP = Signal()
 
     def _device_index_to_name(self, device_index):
@@ -72,16 +79,16 @@ class Microphone(object):
             self._stream.close()
 
     def stop(self):
+        print("CLOSIGN STREAM", self._stream)
+        if self._stop_mic_event:
+            self._stop_mic_event.set()
         if self._stream:
             self._stream.close()
 
-    def _callback(self, loop, in_data, frame_count, time_info, status):
+    def _callback(self, in_data, frame_count, time_info, status):
         """Pass on data received on the stream to the REC signal
         """
-        loop.call_soon_threadsafe(
-            self.mic_queue.put_nowait,
-            in_data.astype(DTYPE)
-        )
+        self.mic_queue.put(in_data.astype(DTYPE))
         return
 
     def reset_stream(self):
@@ -99,37 +106,56 @@ class Microphone(object):
             "device_info": device_info,
         })
 
-        loop = asyncio.get_event_loop()
+        self._stream = self.get_stream(device_info, retry=10)
+        self._stream.start()
 
-        try:
-            self._stream = sd.InputStream(
-                dtype=DTYPE,
-                samplerate=rate,
-                blocksize=CHUNK,
-                device=self.device_index,
-                channels=self.n_channels,
-                callback=partial(self._callback, loop),
-            )
-        except:
-            raise
-        else:
-            self._stream.start()
+    def get_stream(self, device_info, timeout=None, retry=5):
+        rate = int(device_info["default_samplerate"])
 
-    async def run(self):
+        for _ in range(retry):
+            try:
+                self._stream = sd.InputStream(
+                    dtype=DTYPE,
+                    samplerate=rate,
+                    blocksize=CHUNK,
+                    device=self.device_index,
+                    channels=self.n_channels,
+                    callback=self._callback,
+                )
+            except:
+                time.sleep(0.1)
+            else:
+                return self._stream
+
+    def run(self):
         """Start an audio input stream and emit metadata
 
         By using a queue, we decouple the emission of events with the capturing
         of audio data.
         """
+        self._stop_mic_event = threading.Event()
+        loop = asyncio.get_event_loop()
+        # The mic thread is really the main listening thread of the app
+        # and will process all downstream events that are emitted.
+
+        # We need to be careful though to not do gui updates on this thread.
+        self.mic_thread = threading.Thread(
+            target=self._run,
+            args=(loop,),
+        )
+        self.mic_thread.start()
+
+    def _run(self, loop):
         self.reset_stream()
         running = True
-        while running:
+        while not self._stop_mic_event.is_set():
             try:
-                chunk = await self.mic_queue.get()
+                chunk = self.mic_queue.get(timeout=0.4)
             except:
                 running = False
             else:
-                self.REC.emit(chunk)
+                asyncio.run_coroutine_threadsafe(self.REC.emit(chunk), loop)
+                # loop.call_soon_threadsafe(asyncio.async, self.REC.emit(chunk))
 
 
 class SoundDetector(object):
@@ -193,6 +219,11 @@ class SoundDetector(object):
     def set_channel_threshold(self, channel, threshold):
         self.thresholds[channel] = threshold
 
+    def read_channel_threshold(self, channel):
+        if channel not in self.thresholds:
+            self.thresholds[channel] = self.default_threshold
+        return self.thresholds[channel]
+
     def receive_data(self, data):
         if self._buffer.maxlen == 0:
             return
@@ -205,11 +236,8 @@ class SoundDetector(object):
 
         for ch_idx in range(dat.shape[1]):
             # Thresholds get set here if they are missing
-            if ch_idx not in self.thresholds:
-                self.thresholds[ch_idx] = self.default_threshold
-
             threshold_crossings = np.nonzero(
-                np.diff(np.abs(dat[:, ch_idx]) > self.thresholds[ch_idx])
+                np.diff(np.abs(dat[:, ch_idx]) > self.read_channel_threshold(ch_idx))
             )[0]
 
             ratio = int(threshold_crossings.size) / self.crossings_threshold

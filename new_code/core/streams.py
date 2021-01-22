@@ -32,7 +32,8 @@ from core.utils import db_scale
 def save_wav_file(path: str, data, sampling_rate: int):
     """Create path to and save wav file
     """
-    directory, _ = os.path.dirname(path)
+    directory = os.path.dirname(path)
+
     if not os.path.exists(directory):
         os.makedirs(directory)
 
@@ -178,6 +179,7 @@ class SingleStreamController(object):
         self.saver = None
         self.collector = None
         self.detector = None
+        self.monitor = True
 
         self.name = ""
         self.gain = 0
@@ -216,6 +218,9 @@ class SingleStreamController(object):
         else:
             self.collector.toggle(mode)
 
+    def set_monitor(self, monitor: bool):
+        self.monitor = monitor
+
     def apply_config(self, config: dict):
         """Initialize streams from config dict
 
@@ -253,6 +258,9 @@ class SingleStreamController(object):
         self.detector.set_sampling_rate(setup_dict["rate"])
 
     def on_save_ready(self, data, sampling_rate: int):
+        if self.monitor:
+            return
+
         file_timestamp = (
             datetime.datetime.now()
             - (datetime.timedelta(seconds=data.shape[0] / sampling_rate))
@@ -354,7 +362,19 @@ class IndependentStreamController(MultiStreamController):
 
     def get_streams(self) -> List[dict]:
         """Return a list of dictionaries with stream info"""
-        return [{"channel": stream.channel} for stream in self.stream_controllers]
+        return [
+            {
+                "idx": stream.id_,
+                "channel": stream.channel,
+                "gain": stream.gain,
+                "threshold": stream.detector.read_channel_threshold(0),
+                "name": stream.name,
+                "triggered": stream.collector.mode == TRIGGERED,
+                "monitor": stream.monitor,
+                "save": None, # IDK
+            }
+            for stream in self.stream_controllers
+        ]
 
     def stop(self):
         """Clear out signal observers"""
@@ -367,6 +387,30 @@ class IndependentStreamController(MultiStreamController):
     @property
     def stream_channels(self):
         return [stream.channel for stream in self.stream_controllers]
+
+    def set_monitor(self, monitor: bool):
+        for stream_controller in self.stream_controllers:
+            stream_controller.set_monitor(monitor)
+
+    def set_stream_monitor(self, mstream_index: int, monitor: bool):
+        self.stream_controllers[stream_index].set_monitor(monitor)
+
+    def set_recording_mode(self, mode: str):
+        """Set recording mode between modes.CONTINUOUS and modes.TRIGGERED
+        """
+        if mode not in (CONTINUOUS, TRIGGERED):
+            pass
+        else:
+            for stream_controller in self.stream_controllers:
+                stream_controller.collector.toggle(mode)
+
+    def set_stream_recording_mode(self, stream_index: int, mode: str):
+        self.stream_controllers[stream_index].collector.toggle(mode)
+
+    def set_stream_threshold(self, threshold: float):
+        """Set the gain of a stream by index
+        """
+        self.stream_controllers[stream_index].detector.set_channel_threshold(0, threshold)
 
     def set_stream_gain(self, stream_index: int, gain: float):
         """Set the gain of a stream by index
@@ -472,6 +516,8 @@ class SynchronizedStreamController(MultiStreamController):
         self.name_per_stream: List[str] = []  # Name of each stream
         self.gain_per_stream = np.array([])  # Gain of each stream
 
+        self.monitor = True
+
         # Setup signals
         self.mic.REC.connect(self._filter)
         self._FILTERED = Signal()  # Launder the REC signal with the stream's gain
@@ -480,7 +526,19 @@ class SynchronizedStreamController(MultiStreamController):
 
     def get_streams(self) -> List[dict]:
         """Return a list of dictionaries with stream info"""
-        return [{"channel": channel} for channel in self.stream_channels]
+        return [
+            {
+                "idx": i,
+                "channel": channel,
+                "gain": self.gain_per_stream[i],
+                "threshold": self.detector.read_channel_threshold(i),
+                "name": self.name_per_stream[i],
+                "triggered": self.collector.mode == TRIGGERED,
+                "monitor": self.monitor,
+                "save": None, # IDK
+            }
+            for i, channel in enumerate(self.stream_channels)
+        ]
 
     @property
     def name(self):
@@ -504,6 +562,28 @@ class SynchronizedStreamController(MultiStreamController):
         """Clear out signal observers"""
         self.mic.REC.disconnect(self._filter)
         self.mic.SETUP.disconnect(self.on_mic_setup)
+
+    def set_monitor(self, monitor: bool):
+        self.monitor = monitor
+
+    def set_stream_monitor(self, stream_index: int, mode: str):
+        raise NotImplementedError("Synchronized recordings can't set individual streams to monitor")
+
+    def set_recording_mode(self, mode: str):
+        """Set recording mode between modes.CONTINUOUS and modes.TRIGGERED
+        """
+        if mode not in (CONTINUOUS, TRIGGERED):
+            pass
+        else:
+            self.collector.toggle(mode)
+
+    def set_stream_recording_mode(self, stream_index: int, mode: str):
+        raise NotImplementedError("Synchronized recordings can't set individual stream triggers")
+
+    def set_stream_threshold(self, stream_index: int, threshold: float):
+        """Set the gain of a stream by index
+        """
+        self.detector.set_channel_threshold(stream_index, threshold)
 
     def set_stream_gain(self, stream_index: int, gain: float):
         """Set the gain of a stream by index
@@ -597,6 +677,9 @@ class SynchronizedStreamController(MultiStreamController):
         self.detector.set_sampling_rate(setup_dict["rate"])
 
     def on_save_ready(self, data, sampling_rate: int):
+        if self.monitor:
+            return
+
         file_timestamp = (
             datetime.datetime.now()
             - (datetime.timedelta(seconds=data.shape[0] / sampling_rate))

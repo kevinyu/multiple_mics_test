@@ -39,3 +39,22 @@ class Signal(object):
         id_ = id(callback)
         if id_ in self.callbacks:
             del self.callbacks[id_]
+
+
+class AsyncSignal(Signal):
+    def __init__(self, debug=False):
+        self._debug = debug
+        self.callbacks = {}
+
+    async def emit(self, *args, **kwargs):
+        """Send an event to Signal's registered callbacks"""
+        for id_ in self.callbacks:
+            # callback = self.callbacks[id_]()
+            callback = self.callbacks[id_]
+            if self._debug:
+                print("DEBUG Signal: {} {} {}".format(callback, args, kwargs))
+            if callback is not None:
+                try:
+                    callback(*args, **kwargs)
+                except:
+                    raise

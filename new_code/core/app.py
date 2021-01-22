@@ -1,7 +1,7 @@
 """Interface independent application controller
 """
 
-from core.listen import Microphone
+from core.listen import Microphone, list_devices
 from core.streams import IndependentStreamController, SynchronizedStreamController
 
 
@@ -34,6 +34,9 @@ class AppController(object):
         self._config = {}
         self.stream_controller = None
 
+    def list_devices(self):
+        return list_devices()
+
     def apply_config(self, config: dict):
         """Apply a configuration dictionary to connect microphone and streams
 
@@ -48,7 +51,7 @@ class AppController(object):
         # Apply defaults from the op layer of the config to each stream
         for stream in streams:
             if "gain" not in stream:
-                stream["gain"] = config.get("gain")
+                stream["gain"] = config.get("gain", 0)
             for key, val in config.get("save", {}).items():
                 if key not in stream.get("save", {}):
                     if "save" not in stream:
