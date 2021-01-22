@@ -79,7 +79,6 @@ class Microphone(object):
             self._stream.close()
 
     def stop(self):
-        print("CLOSIGN STREAM", self._stream)
         if self._stop_mic_event:
             self._stop_mic_event.set()
         if self._stream:
@@ -196,6 +195,13 @@ class SoundDetector(object):
 
         self.DETECTED = Signal()
 
+    def to_config(self):
+        return {
+            "detection_window": self.detection_window,
+            "threshold": self.default_threshold,
+            "crossings_threshold": self.crossings_threshold,
+        }
+
     def apply_config(self, config):
         self.detection_window = config.get("detection_window", self.detection_window)
         self.default_threshold = config.get("threshold", self.default_threshold)
@@ -264,8 +270,8 @@ class BaseSoundCollector(object):
         Process a chunk of data by adding it to the current buffer, and emit
         save data via SAVE_READY if necessary
     """
-    DEFAULT_MIN_FILE_DURATION = 1.0
-    DEFAULT_MAX_FILE_DURATION = 30.0
+    DEFAULT_MIN_FILE_DURATION = 0.5
+    DEFAULT_MAX_FILE_DURATION = 10.0
     DEFAULT_BUFFER_DURATION = 0.2
 
     def __init__(
@@ -310,6 +316,13 @@ class BaseSoundCollector(object):
 
         self.SAVE_READY = Signal()
         self.RECORDING = Signal()
+
+    def to_config(self):
+        return {
+            "min_file_duration": self.min_file_duration,
+            "max_file_duration": self.max_file_duration,
+            "buffer_duration": self.buffer_duration,
+        }
 
     def apply_config(self, config):
         self.min_file_duration = config.get("min_file_duration", self.min_file_duration)
@@ -410,6 +423,12 @@ class ToggledSoundCollector(BaseSoundCollector):
         self.mode = TRIGGERED if is_triggered else CONTINUOUS
         if self.mode == CONTINUOUS:
             self.start_recording()
+
+    def to_config(self):
+        config = super().to_config()
+        config["triggered"] = self.mode == TRIGGERED
+
+        return config
 
     def toggle(self, new_mode):
         self.stop_recording()

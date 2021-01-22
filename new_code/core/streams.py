@@ -71,6 +71,13 @@ class Pathfinder(object):
         "{day}",
     ]
 
+    def to_config(self):
+        return {
+            "base_dir": self.base_dir,
+            "subdirectories": self.subdirectories,
+            "filename_format": self.filename_format,
+        }
+
     def apply_config(self, config: dict):
         """Set attributes from config dictionary
 
@@ -176,7 +183,7 @@ class SingleStreamController(object):
         self.id_ = id_
 
         self.mic = mic
-        self.saver = None
+        # self.saver = None
         self.collector = None
         self.detector = None
         self.monitor = True
@@ -233,8 +240,8 @@ class SingleStreamController(object):
         if self.channel is None:
             raise ValueError("Stream must specific a channel index")
 
-        self.collector = ToggledSoundCollector(config.get("save", {}).get("triggered"))
-        self.collector.apply_config(config.get("save", {}))
+        self.collector = ToggledSoundCollector(config.get("collect", {}).get("triggered"))
+        self.collector.apply_config(config.get("collect", {}))
 
         self.saver = Pathfinder()
         self.saver.apply_config(config.get("save", {}))
@@ -384,6 +391,11 @@ class IndependentStreamController(MultiStreamController):
             stream.DETECTED.disconnect(self.DETECTED.emit)
             stream.stop()
 
+    def apply_collector_config(self, collect_config: dict):
+        for stream_controller in self.stream_controllers:
+            stream_controller.collector.apply_config(collect_config)
+            stream_controller.collector.toggle(TRIGGERED if collect_config.get("triggered") else CONTINUOUS)
+
     @property
     def stream_channels(self):
         return [stream.channel for stream in self.stream_controllers]
@@ -392,7 +404,7 @@ class IndependentStreamController(MultiStreamController):
         for stream_controller in self.stream_controllers:
             stream_controller.set_monitor(monitor)
 
-    def set_stream_monitor(self, mstream_index: int, monitor: bool):
+    def set_stream_monitor(self, stream_index: int, monitor: bool):
         self.stream_controllers[stream_index].set_monitor(monitor)
 
     def set_recording_mode(self, mode: str):
@@ -407,7 +419,11 @@ class IndependentStreamController(MultiStreamController):
     def set_stream_recording_mode(self, stream_index: int, mode: str):
         self.stream_controllers[stream_index].collector.toggle(mode)
 
-    def set_stream_threshold(self, threshold: float):
+    def set_threshold(self, threshold: float):
+        for stream_controller in self.stream_controllers:
+            stream_controller.detector.set_channel_threshold(0, threshold)
+
+    def set_stream_threshold(self, stream_index: int, threshold: float):
         """Set the gain of a stream by index
         """
         self.stream_controllers[stream_index].detector.set_channel_threshold(0, threshold)
@@ -444,6 +460,9 @@ class IndependentStreamController(MultiStreamController):
         del self.stream_controllers[stream_index]
         self._renumber()
 
+    def get_buffer_duration(self):
+        return self.stream_controllers[0].collector.buffer_duration
+
     def _renumber(self):
         for i, stream in enumerate(self.stream_controllers):
             stream.id_ = i
@@ -456,6 +475,7 @@ class IndependentStreamController(MultiStreamController):
         streams = config.get("streams", [])
         for i, stream_config in enumerate(streams):
             stream = SingleStreamController(mic=self.mic, id_=i)
+            stream_config["save"] = config.get("save", {})
             stream.apply_config(stream_config)
             stream.SAVE.connect(save_wav_file)
             stream.OUTPUT.connect(self.OUTPUT.emit)
@@ -464,6 +484,33 @@ class IndependentStreamController(MultiStreamController):
 
         self.mic.set_channels(self.stream_channels)
         self.mic.reset_stream()
+
+    def to_config(self):
+        collect_config = {}
+        save_config = self.stream_controllers[0].saver.to_config()
+        detect_config = {}
+
+        streams_config = []
+
+        for i, stream_controller in enumerate(self.stream_controllers):
+            stream_config = {}
+            stream_config["channel"] = stream_controller.channel
+            stream_config["name"] = stream_controller.name
+            stream_config["gain"] = stream_controller.gain
+
+            stream_config["collect"] = stream_controller.collector.to_config()
+            # stream_config["save"] = stream_controller.saver.to_config()
+            stream_config["detect"] = stream_controller.detector.to_config()
+            stream_config["detect"]["threshold"] = stream_controller.detector.read_channel_threshold(0)
+
+            streams_config.append(stream_config)
+
+        return {
+            "save": save_config,
+            "detect": detect_config,
+            "collect": collect_config,
+            "streams": streams_config,
+        }
 
 
 class SynchronizedStreamController(MultiStreamController):
@@ -577,13 +624,25 @@ class SynchronizedStreamController(MultiStreamController):
         else:
             self.collector.toggle(mode)
 
+    def apply_collector_config(self, collect_config: dict):
+        self.collector.apply_config(collect_config)
+        self.collector.toggle(TRIGGERED if collect_config.get("triggered") else CONTINUOUS)
+
     def set_stream_recording_mode(self, stream_index: int, mode: str):
         raise NotImplementedError("Synchronized recordings can't set individual stream triggers")
+
+    def set_threshold(self, threshold: float):
+        for i in range(len(self.stream_channels)):
+            self.detector.set_threshold(i, threshold)
 
     def set_stream_threshold(self, stream_index: int, threshold: float):
         """Set the gain of a stream by index
         """
         self.detector.set_channel_threshold(stream_index, threshold)
+
+    def set_gain(self, gain: float):
+        for i in range(len(self.stream_channels)):
+            self.gain_per_stream[i] = gain
 
     def set_stream_gain(self, stream_index: int, gain: float):
         """Set the gain of a stream by index
@@ -648,8 +707,8 @@ class SynchronizedStreamController(MultiStreamController):
             self.name_per_stream.append(stream.get("name", "Ch{}".format(stream["channel"])))
             self.gain_per_stream[i] = stream.get("gain", 0)
 
-        self.collector = ToggledSoundCollector(config.get("save", {}).get("triggered"))
-        self.collector.apply_config(config.get("save", {}))
+        self.collector = ToggledSoundCollector(config.get("collect", {}).get("triggered"))
+        self.collector.apply_config(config.get("collect", {}))
 
         self.saver = Pathfinder()
         self.saver.apply_config(config.get("save", {}))
@@ -672,6 +731,9 @@ class SynchronizedStreamController(MultiStreamController):
         self.mic.set_channels(self.stream_channels)
         self.mic.reset_stream()
 
+    def get_buffer_duration(self):
+        return self.collector.buffer_duration
+
     def on_mic_setup(self, setup_dict: dict):
         self.collector.set_sampling_rate(setup_dict["rate"])
         self.detector.set_sampling_rate(setup_dict["rate"])
@@ -691,3 +753,29 @@ class SynchronizedStreamController(MultiStreamController):
     def on_filtered(self, data):
         for i in range(data.shape[1]):
             self.OUTPUT.emit(i, data[:, i:i+1])
+
+    def to_config(self):
+        collect_config = self.collector.to_config()
+        save_config = self.saver.to_config()
+        detect_config = self.detector.to_config()
+
+        streams_config = []
+
+        for i in range(len(self.stream_channels)):
+            stream_config = {}
+            stream_config["channel"] = self.stream_channels[i]
+            stream_config["name"] = self.name_per_stream[i]
+            stream_config["gain"] = self.gain_per_stream[i]
+            stream_config["collect"] = {}
+            # stream_config["save"] = {}
+            stream_config["detect"] = {
+                "threshold": self.detector.read_channel_threshold(i)
+            }
+            streams_config.append(stream_config)
+
+        return {
+            "save": save_config,
+            "detect": detect_config,
+            "collect": collect_config,
+            "streams": streams_config,
+        }

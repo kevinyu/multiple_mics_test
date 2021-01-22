@@ -9,7 +9,7 @@ def cli():
 
 
 @click.command()
-@click.option("-c", "--config", type=click.Path(exists=True))
+@click.option("-c", "--config", type=click.Path(exists=True), default=None)
 def gui(config):
     """Entrypoint into test application
     """

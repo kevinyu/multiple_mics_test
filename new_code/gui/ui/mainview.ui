@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>993</width>
-    <height>778</height>
+    <width>674</width>
+    <height>612</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -102,7 +102,7 @@
          </rect>
         </property>
         <property name="styleSheet">
-         <string notr="true">color: #BB2929</string>
+         <string notr="true"/>
         </property>
         <property name="text">
          <string>Record</string>
@@ -216,7 +216,7 @@
          <bool>true</bool>
         </property>
         <property name="checked">
-         <bool>true</bool>
+         <bool>false</bool>
         </property>
         <attribute name="buttonGroup">
          <string notr="true">triggeredAllButtons</string>
@@ -242,26 +242,42 @@
         <property name="checkable">
          <bool>true</bool>
         </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
         <attribute name="buttonGroup">
          <string notr="true">triggeredAllButtons</string>
         </attribute>
        </widget>
-       <widget class="QLabel" name="refreshDeviceList">
+       <widget class="QPushButton" name="refreshDeviceListButton">
         <property name="geometry">
          <rect>
           <x>10</x>
           <y>70</y>
-          <width>121</width>
-          <height>17</height>
+          <width>111</width>
+          <height>23</height>
          </rect>
         </property>
         <property name="font">
          <font>
           <pointsize>8</pointsize>
+          <underline>false</underline>
+          <strikeout>false</strikeout>
          </font>
         </property>
         <property name="styleSheet">
-         <string notr="true">color: blue;</string>
+         <string notr="true">QPushButton {
+background: none;
+color: rgb(16, 37, 127);
+text-align: left;
+border: none;
+text-decoration: none;
+}
+     
+QPushButton:hover {
+color: rgb(116, 137, 127);
+text-decoration: underline;
+}</string>
         </property>
         <property name="text">
          <string>refresh device list</string>
@@ -273,13 +289,77 @@
         <string>Options</string>
        </attribute>
        <layout class="QGridLayout" name="gridLayout_3">
-        <item row="0" column="0">
-         <widget class="QLabel" name="label_8">
+        <item row="1" column="2">
+         <widget class="QDoubleSpinBox" name="bufferSpinner">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+            <horstretch>2</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="maximum">
+           <double>10.000000000000000</double>
+          </property>
+          <property name="singleStep">
+           <double>0.100000000000000</double>
+          </property>
+          <property name="value">
+           <double>0.200000000000000</double>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="3">
+         <widget class="QDoubleSpinBox" name="defaultGainSpinner">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+            <horstretch>2</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimum">
+           <double>-99.000000000000000</double>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="4">
+         <widget class="QLabel" name="label_13">
           <property name="text">
-           <string>Min File Duration (s)</string>
+           <string>Default threshold</string>
           </property>
           <property name="wordWrap">
            <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QDoubleSpinBox" name="minDurationSpinner">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+            <horstretch>2</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="singleStep">
+           <double>0.100000000000000</double>
+          </property>
+          <property name="value">
+           <double>0.400000000000000</double>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QDoubleSpinBox" name="maxDurationSpinner">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+            <horstretch>2</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="singleStep">
+           <double>0.500000000000000</double>
+          </property>
+          <property name="value">
+           <double>10.000000000000000</double>
           </property>
          </widget>
         </item>
@@ -293,10 +373,42 @@
           </property>
          </widget>
         </item>
+        <item row="1" column="4">
+         <widget class="QSpinBox" name="defaultThresholdSpinner">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+            <horstretch>2</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="maximum">
+           <number>9999</number>
+          </property>
+          <property name="singleStep">
+           <number>20</number>
+          </property>
+          <property name="stepType">
+           <enum>QAbstractSpinBox::DefaultStepType</enum>
+          </property>
+          <property name="value">
+           <number>1000</number>
+          </property>
+         </widget>
+        </item>
         <item row="0" column="2">
          <widget class="QLabel" name="label_10">
           <property name="text">
            <string>Buffer/Padding Duration (s)</string>
+          </property>
+          <property name="wordWrap">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="0">
+         <widget class="QLabel" name="label_8">
+          <property name="text">
+           <string>Min File Duration (s)</string>
           </property>
           <property name="wordWrap">
            <bool>true</bool>
@@ -313,56 +425,10 @@
           </property>
          </widget>
         </item>
-        <item row="0" column="4">
-         <widget class="QLabel" name="label_13">
+        <item row="1" column="5">
+         <widget class="QPushButton" name="applyDetectConfigButton">
           <property name="text">
-           <string>Default threshold</string>
-          </property>
-          <property name="wordWrap">
-           <bool>true</bool>
-          </property>
-         </widget>
-        </item>
-        <item row="1" column="0">
-         <widget class="QSpinBox" name="minDurationSpinner"/>
-        </item>
-        <item row="1" column="1">
-         <widget class="QSpinBox" name="maxDurationSpinner">
-          <property name="stepType">
-           <enum>QAbstractSpinBox::DefaultStepType</enum>
-          </property>
-          <property name="value">
-           <number>10</number>
-          </property>
-         </widget>
-        </item>
-        <item row="1" column="2">
-         <widget class="QSpinBox" name="bufferSpinner">
-          <property name="stepType">
-           <enum>QAbstractSpinBox::DefaultStepType</enum>
-          </property>
-          <property name="value">
-           <number>1</number>
-          </property>
-         </widget>
-        </item>
-        <item row="1" column="3">
-         <widget class="QSpinBox" name="defaultGainSpinner">
-          <property name="stepType">
-           <enum>QAbstractSpinBox::DefaultStepType</enum>
-          </property>
-          <property name="value">
-           <number>1</number>
-          </property>
-         </widget>
-        </item>
-        <item row="1" column="4">
-         <widget class="QSpinBox" name="defaultThresholdSpinner">
-          <property name="stepType">
-           <enum>QAbstractSpinBox::DefaultStepType</enum>
-          </property>
-          <property name="value">
-           <number>1</number>
+           <string>Apply</string>
           </property>
          </widget>
         </item>
@@ -373,19 +439,6 @@
         <string>Saving</string>
        </attribute>
        <layout class="QGridLayout" name="gridLayout_2">
-        <item row="0" column="0">
-         <widget class="QLabel" name="label">
-          <property name="sizePolicy">
-           <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-            <horstretch>1</horstretch>
-            <verstretch>0</verstretch>
-           </sizepolicy>
-          </property>
-          <property name="text">
-           <string>Base save folder</string>
-          </property>
-         </widget>
-        </item>
         <item row="0" column="1">
          <widget class="QLabel" name="label_2">
           <property name="text">
@@ -400,6 +453,29 @@
           </property>
          </widget>
         </item>
+        <item row="1" column="1">
+         <widget class="QLineEdit" name="subdirectoryFormatInput">
+          <property name="readOnly">
+           <bool>false</bool>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="0">
+         <widget class="QLabel" name="label">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+            <horstretch>1</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="text">
+           <string>Base save folder</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="2">
+         <widget class="QLineEdit" name="filenameFormatInput"/>
+        </item>
         <item row="1" column="0">
          <widget class="QLineEdit" name="baseSaveFolderInput">
           <property name="sizePolicy">
@@ -408,13 +484,10 @@
             <verstretch>0</verstretch>
            </sizepolicy>
           </property>
+          <property name="readOnly">
+           <bool>true</bool>
+          </property>
          </widget>
-        </item>
-        <item row="1" column="1">
-         <widget class="QLineEdit" name="subdirectoryFormatInput"/>
-        </item>
-        <item row="1" column="2">
-         <widget class="QLineEdit" name="filenameFormatInput"/>
         </item>
         <item row="2" column="0" colspan="3">
          <widget class="QLabel" name="exampleSavePathLabel">
@@ -426,6 +499,13 @@
           </property>
           <property name="text">
            <string>ExamplePath</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="3">
+         <widget class="QPushButton" name="applySaveConfigButton">
+          <property name="text">
+           <string>Apply</string>
           </property>
          </widget>
         </item>
@@ -455,8 +535,8 @@
         <rect>
          <x>0</x>
          <y>0</y>
-         <width>959</width>
-         <height>568</height>
+         <width>640</width>
+         <height>402</height>
         </rect>
        </property>
        <layout class="QGridLayout" name="gridLayout">
@@ -488,7 +568,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>993</width>
+     <width>674</width>
      <height>20</height>
     </rect>
    </property>
@@ -571,7 +651,7 @@
  <connections/>
  <buttongroups>
   <buttongroup name="recordAllButtons"/>
-  <buttongroup name="triggeredAllButtons"/>
   <buttongroup name="synchronizeButtons"/>
+  <buttongroup name="triggeredAllButtons"/>
  </buttongroups>
 </ui>

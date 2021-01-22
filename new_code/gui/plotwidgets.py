@@ -32,7 +32,7 @@ class Settings(object):
     SPEC_LEVELS_MIN = -10
     SPEC_LEVELS_MAX = 150
     DEFAULT_POWER_THRESHOLD = 500
-    MAX_POWER_THRESHOLD = 5000
+    MAX_POWER_THRESHOLD = 9999
     DETECTION_CROSSINGS_PER_CHUNK = 20
 
     DETECTION_WINDOW = 0.1  # seconds
@@ -243,7 +243,7 @@ class WaveformWidget(pg.PlotWidget):
         super(WaveformWidget, self).__init__()
         self.downsample = downsample
         self._buffer = collections.deque(
-            maxlen=int(window * Settings.RATE / self.downsample)
+            maxlen=int(window * Settings.RATE / chunk_size) #self.downsample)
         )
         self._buffer.extend(np.zeros(self._buffer.maxlen))
 
@@ -258,7 +258,7 @@ class WaveformWidget(pg.PlotWidget):
         self.setMouseEnabled(False, False)
         self.setMenuEnabled(False)
         self.hideButtons()
-        ylim = (-Settings.MAX_POWER_THRESHOLD, Settings.MAX_POWER_THRESHOLD)
+        ylim = (-0.1 * Settings.MAX_POWER_THRESHOLD, Settings.MAX_POWER_THRESHOLD)
         self.setYRange(*ylim, padding=0)
 
     def set_threshold(self, threshold):
@@ -268,7 +268,8 @@ class WaveformWidget(pg.PlotWidget):
     def receive_data(self, chunk):
         # self._buffer.append(np.max(np.power(np.abs(chunk), 2)))
         # self._buffer.extend(np.power(np.abs(chunk), 2))
-        self._buffer.extend(chunk[::self.downsample])
+        # self._buffer.extend(chunk[::self.downsample])
+        self._buffer.append(np.max(np.abs(chunk)))
 
     def draw(self):
         self.curve.setData(np.array(self._buffer).astype(np.float))
