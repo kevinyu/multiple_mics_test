@@ -103,6 +103,7 @@ class Microphone(object):
             "device_index": self.device_index,
             "n_channels": self.n_channels,
             "device_info": device_info,
+            "chunk": CHUNK,
         })
 
         self._stream = self.get_stream(device_info, retry=10)

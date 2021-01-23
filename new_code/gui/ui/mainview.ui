@@ -477,7 +477,7 @@ text-decoration: underline;
          <widget class="QLineEdit" name="filenameFormatInput"/>
         </item>
         <item row="1" column="0">
-         <widget class="QLineEdit" name="baseSaveFolderInput">
+         <widget class="QClickableLineEdit" name="baseSaveFolderInput">
           <property name="sizePolicy">
            <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
             <horstretch>0</horstretch>
@@ -563,6 +563,7 @@ text-decoration: underline;
     </item>
    </layout>
   </widget>
+  <widget class="QStatusBar" name="statusbar"/>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">
     <rect>
@@ -577,9 +578,7 @@ text-decoration: underline;
      <string>File</string>
     </property>
     <addaction name="loadConfigAction"/>
-    <addaction name="actionSave_current_settings"/>
-    <addaction name="separator"/>
-    <addaction name="openSaveLocationAction"/>
+    <addaction name="saveConfigAction"/>
     <addaction name="separator"/>
     <addaction name="exitAction"/>
    </widget>
@@ -587,20 +586,11 @@ text-decoration: underline;
     <property name="title">
      <string>Parameters</string>
     </property>
-    <addaction name="spectrogramAction"/>
-    <addaction name="amplitudeAction"/>
-   </widget>
-   <widget class="QMenu" name="menuHelp">
-    <property name="title">
-     <string>Help</string>
-    </property>
-    <addaction name="openLogsAction"/>
+    <addaction name="plotParametersAction"/>
    </widget>
    <addaction name="menuFile"/>
    <addaction name="menuViews"/>
-   <addaction name="menuHelp"/>
   </widget>
-  <widget class="QStatusBar" name="statusbar"/>
   <action name="loadConfigAction">
    <property name="text">
     <string>Load config</string>
@@ -616,9 +606,9 @@ text-decoration: underline;
     <string>Quit</string>
    </property>
   </action>
-  <action name="spectrogramAction">
+  <action name="plotParametersAction">
    <property name="text">
-    <string>Spectrogram</string>
+    <string>Spectrogram/Amplitude</string>
    </property>
   </action>
   <action name="amplitudeAction">
@@ -641,17 +631,41 @@ text-decoration: underline;
     <string>Open save location...</string>
    </property>
   </action>
-  <action name="actionSave_current_settings">
+  <action name="saveConfigAction">
    <property name="text">
     <string>Save current settings</string>
    </property>
   </action>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>QClickableLineEdit</class>
+   <extends>QLineEdit</extends>
+   <header>gui.ui.utils</header>
+  </customwidget>
+ </customwidgets>
  <resources/>
- <connections/>
+ <connections>
+  <connection>
+   <sender>exitAction</sender>
+   <signal>triggered()</signal>
+   <receiver>MainWindow</receiver>
+   <slot>close()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>-1</x>
+     <y>-1</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>336</x>
+     <y>305</y>
+    </hint>
+   </hints>
+  </connection>
+ </connections>
  <buttongroups>
-  <buttongroup name="recordAllButtons"/>
   <buttongroup name="synchronizeButtons"/>
   <buttongroup name="triggeredAllButtons"/>
+  <buttongroup name="recordAllButtons"/>
  </buttongroups>
 </ui>

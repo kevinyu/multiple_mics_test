@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>880</width>
-    <height>296</height>
+    <width>606</width>
+    <height>213</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -35,51 +35,62 @@
       <property name="spacing">
        <number>1</number>
       </property>
-      <item row="2" column="2">
-       <layout class="QHBoxLayout" name="horizontalLayout_2">
-        <property name="spacing">
-         <number>0</number>
+      <item row="0" column="0">
+       <widget class="QLabel" name="indexLabel">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
         </property>
+        <property name="font">
+         <font>
+          <pointsize>14</pointsize>
+          <weight>75</weight>
+          <bold>true</bold>
+         </font>
+        </property>
+        <property name="text">
+         <string>1</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="3">
+       <layout class="QHBoxLayout" name="horizontalLayout_4">
         <item>
-         <widget class="QPushButton" name="triggeredButton">
+         <widget class="QCheckBox" name="amplitudeViewCheckBox">
           <property name="font">
            <font>
             <pointsize>8</pointsize>
            </font>
           </property>
-          <property name="text">
-           <string>Triggered</string>
+          <property name="layoutDirection">
+           <enum>Qt::RightToLeft</enum>
           </property>
-          <property name="checkable">
-           <bool>true</bool>
+          <property name="text">
+           <string>Amplitude</string>
           </property>
           <property name="checked">
            <bool>true</bool>
           </property>
-          <attribute name="buttonGroup">
-           <string notr="true">triggeredButtons</string>
-          </attribute>
          </widget>
         </item>
         <item>
-         <widget class="QPushButton" name="continuousButton">
+         <widget class="QCheckBox" name="spectrogramViewCheckBox">
           <property name="font">
            <font>
             <pointsize>8</pointsize>
            </font>
           </property>
-          <property name="text">
-           <string>Continuous</string>
+          <property name="layoutDirection">
+           <enum>Qt::RightToLeft</enum>
           </property>
-          <property name="checkable">
-           <bool>true</bool>
+          <property name="text">
+           <string>Spectrogram</string>
           </property>
           <property name="checked">
-           <bool>false</bool>
+           <bool>true</bool>
           </property>
-          <attribute name="buttonGroup">
-           <string notr="true">triggeredButtons</string>
-          </attribute>
          </widget>
         </item>
        </layout>
@@ -227,134 +238,54 @@
         </layout>
        </widget>
       </item>
-      <item row="1" column="1" colspan="3">
-       <widget class="QFrame" name="plotView">
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-          <horstretch>1</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
+      <item row="2" column="2">
+       <layout class="QHBoxLayout" name="horizontalLayout_2">
+        <property name="spacing">
+         <number>0</number>
         </property>
-        <property name="frameShape">
-         <enum>QFrame::WinPanel</enum>
-        </property>
-        <property name="frameShadow">
-         <enum>QFrame::Sunken</enum>
-        </property>
-        <layout class="QVBoxLayout" name="verticalLayout_2">
-         <item>
-          <layout class="QVBoxLayout" name="plotViewLayout">
-           <property name="spacing">
-            <number>1</number>
-           </property>
-          </layout>
-         </item>
-        </layout>
-       </widget>
-      </item>
-      <item row="2" column="0">
-       <widget class="QLabel" name="editPathLabel">
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-          <horstretch>0</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
-        </property>
-        <property name="font">
-         <font>
-          <pointsize>8</pointsize>
-         </font>
-        </property>
-        <property name="styleSheet">
-         <string notr="true">color:blue</string>
-        </property>
-        <property name="text">
-         <string>Edit stream</string>
-        </property>
-        <property name="alignment">
-         <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="0">
-       <widget class="QLabel" name="indexLabel">
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-          <horstretch>0</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
-        </property>
-        <property name="font">
-         <font>
-          <pointsize>14</pointsize>
-          <weight>75</weight>
-          <bold>true</bold>
-         </font>
-        </property>
-        <property name="text">
-         <string>1</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="3">
-       <layout class="QHBoxLayout" name="horizontalLayout_4">
         <item>
-         <widget class="QCheckBox" name="amplitudeViewCheckBox">
+         <widget class="QPushButton" name="triggeredButton">
           <property name="font">
            <font>
             <pointsize>8</pointsize>
            </font>
           </property>
-          <property name="layoutDirection">
-           <enum>Qt::RightToLeft</enum>
-          </property>
           <property name="text">
-           <string>Amplitude</string>
+           <string>Triggered</string>
+          </property>
+          <property name="checkable">
+           <bool>true</bool>
           </property>
           <property name="checked">
            <bool>true</bool>
           </property>
+          <attribute name="buttonGroup">
+           <string notr="true">triggeredButtons</string>
+          </attribute>
          </widget>
         </item>
         <item>
-         <widget class="QCheckBox" name="spectrogramViewCheckBox">
+         <widget class="QPushButton" name="continuousButton">
           <property name="font">
            <font>
             <pointsize>8</pointsize>
            </font>
           </property>
-          <property name="layoutDirection">
-           <enum>Qt::RightToLeft</enum>
-          </property>
           <property name="text">
-           <string>Spectrogram</string>
+           <string>Continuous</string>
           </property>
-          <property name="checked">
+          <property name="checkable">
            <bool>true</bool>
           </property>
+          <property name="checked">
+           <bool>false</bool>
+          </property>
+          <attribute name="buttonGroup">
+           <string notr="true">triggeredButtons</string>
+          </attribute>
          </widget>
         </item>
        </layout>
-      </item>
-      <item row="0" column="1">
-       <widget class="QLabel" name="streamNameLabel">
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
-          <horstretch>0</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
-        </property>
-        <property name="font">
-         <font>
-          <pointsize>11</pointsize>
-          <weight>50</weight>
-          <bold>false</bold>
-         </font>
-        </property>
-        <property name="text">
-         <string>Stream Name</string>
-        </property>
-       </widget>
       </item>
       <item row="2" column="3">
        <layout class="QHBoxLayout" name="horizontalLayout">
@@ -405,7 +336,100 @@
         </item>
        </layout>
       </item>
-      <item row="2" column="1">
+      <item row="1" column="1" colspan="3">
+       <widget class="QFrame" name="plotView">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+          <horstretch>1</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="frameShape">
+         <enum>QFrame::WinPanel</enum>
+        </property>
+        <property name="frameShadow">
+         <enum>QFrame::Sunken</enum>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_2">
+         <item>
+          <layout class="QVBoxLayout" name="plotViewLayout">
+           <property name="spacing">
+            <number>1</number>
+           </property>
+          </layout>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="0" column="1" colspan="2">
+       <layout class="QHBoxLayout" name="horizontalLayout_5">
+        <item>
+         <widget class="QLabel" name="streamNameLabel">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="font">
+           <font>
+            <pointsize>11</pointsize>
+            <weight>50</weight>
+            <bold>false</bold>
+           </font>
+          </property>
+          <property name="text">
+           <string>Stream Name</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="editNameButton">
+          <property name="font">
+           <font>
+            <pointsize>8</pointsize>
+            <underline>false</underline>
+            <strikeout>false</strikeout>
+           </font>
+          </property>
+          <property name="autoFillBackground">
+           <bool>false</bool>
+          </property>
+          <property name="styleSheet">
+           <string notr="true">QPushButton {
+background: none;
+color: rgb(16, 37, 127);
+text-align: left;
+border: none;
+text-decoration: none;
+}
+     
+QPushButton:hover {
+color: rgb(116, 137, 127);
+text-decoration: underline;
+}</string>
+          </property>
+          <property name="text">
+           <string>edit</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="horizontalSpacer">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+      <item row="2" column="0" colspan="2">
        <widget class="QLabel" name="detectionIndicatorLabel">
         <property name="text">
          <string>-</string>
@@ -420,7 +444,7 @@
  <resources/>
  <connections/>
  <buttongroups>
-  <buttongroup name="triggeredButtons"/>
   <buttongroup name="recordButtons"/>
+  <buttongroup name="triggeredButtons"/>
  </buttongroups>
 </ui>

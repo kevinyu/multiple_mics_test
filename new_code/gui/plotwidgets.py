@@ -6,6 +6,9 @@ import numpy as np
 
 from PyQt5.QtCore import pyqtSignal, QObject, QThread, pyqtSlot
 
+from core.config import PlotConfig
+
+
 class Settings(object):
     CHUNK = 1024
     RATE = 44100
@@ -146,14 +149,9 @@ class SpectrogramWidget(pg.PlotWidget):
 
     def __init__(
             self,
-            chunk_size,
-            min_freq=500,
-            max_freq=8000,
+            config: PlotConfig,
             show_x=False,
-            window=5,
-            cmap=None
         ):
-
         super(SpectrogramWidget, self).__init__()
         self.setMouseEnabled(False, False)
         self.setMenuEnabled(False)
@@ -162,37 +160,60 @@ class SpectrogramWidget(pg.PlotWidget):
         self.img = pg.ImageItem()
         self.addItem(self.img)
 
-        self.chunk_size = chunk_size
+        self.img_array = None
+        self._worker = None
+
+        self.apply_config(config)
+
+    def set_info(self, rate=None, chunk=None):
+        if rate is not None:
+            self._config["rate"] = rate
+        if chunk is not None:
+            self._config["chunk"] = chunk
+        self.apply_config(self._config)
+
+    def apply_config(self, config: PlotConfig):
+        self._config = config
+        self.chunk_size = config["chunk"]
         freq = (
             np.arange((self.chunk_size // 2) + 1) /
-            (float(self.chunk_size) / Settings.RATE)
+            (float(self.chunk_size) / config["rate"])
         )
         self.freq_mask = np.where(
-            (min_freq < freq) &
-            (freq < max_freq)
+            (config["spectrogram.min_freq"] < freq) &
+            (freq < config["spectrogram.max_freq"])
         )[0]
 
-        self.img_array = np.zeros((
-            int(window * Settings.RATE / Settings.CHUNK),
+        new_shape = (
+            int(config["window"] * config["rate"] / config["chunk"]),
             len(freq[self.freq_mask])
-        ))
-        self.cmap = self.get_cmap(cmap)
+        )
+        if self.img_array is None or self.img_array.shape != new_shape:
+            self.img_array = np.zeros(new_shape)
+
+        self.cmap = self.get_cmap(config["spectrogram.cmap"])
 
         lut = self.cmap.getLookupTable(0.0, 1.0, 256)
 
         self.img.setLookupTable(lut)
-        self.img.setLevels([Settings.SPEC_LEVELS_MIN, Settings.SPEC_LEVELS_MAX])
+        self.img.setLevels([config["spectrogram.min_level"], config["spectrogram.max_level"]])
 
         yscale = (
             1.0 /
             (self.img_array.shape[1] / freq[self.freq_mask][-1])
         )
 
-        self.img.scale((1. / Settings.RATE) * self.chunk_size, yscale)
+        self.img.scale(1, yscale) # (1. / config["rate"]) * self.chunk_size, yscale)
         self.win = np.hanning(self.chunk_size)
 
-        self._worker = FFTWorker(self.win, self.chunk_size)
-        self._worker.OUT.connect(self.push_data)
+        if self._worker:
+            self._worker.win = self.win
+            self._worker.chunk_size = self.chunk_size
+        else:
+            self._worker = FFTWorker(self.win, self.chunk_size)
+            self._worker.OUT.connect(self.push_data)
+
+        self.setXRange(0, self.img_array.shape[0])
 
     def get_cmap(self, cmap):
         if cmap is None:
@@ -213,15 +234,18 @@ class SpectrogramWidget(pg.PlotWidget):
         return cmap
 
     def receive_data(self, chunk):
-        self._worker.IN.emit(chunk)
+        if self._worker:
+            self._worker.IN.emit(chunk)
 
     @pyqtSlot(object)
     def push_data(self, psd):
-        self.img_array = np.roll(self.img_array, -1, 0)
-        self.img_array[-1:] = psd[self.freq_mask]
+        if self.img_array is not None:
+            self.img_array = np.roll(self.img_array, -1, 0)
+            self.img_array[-1:] = psd[self.freq_mask]
 
     def draw(self):
-        self.img.setImage(self.img_array, autoLevels=False)
+        if self.img_array is not None:
+            self.img.setImage(self.img_array, autoLevels=False)
 
 
 class WaveformWidget(pg.PlotWidget):
@@ -233,43 +257,76 @@ class WaveformWidget(pg.PlotWidget):
 
     def __init__(
             self,
-            chunk_size,
+            config: PlotConfig,
             show_x=False,
-            window=5,
-            ylim=(0, Settings.MAX_POWER_THRESHOLD),
-            threshold=Settings.DEFAULT_POWER_THRESHOLD,
-            downsample=Settings.DISPLAY_AMP_DOWNSAMPLE,
         ):
         super(WaveformWidget, self).__init__()
-        self.downsample = downsample
-        self._buffer = collections.deque(
-            maxlen=int(window * Settings.RATE / chunk_size) #self.downsample)
-        )
-        self._buffer.extend(np.zeros(self._buffer.maxlen))
-
         self.showAxis("left", False)
         self.showAxis("bottom", show_x)
 
-        self.chunk_size = chunk_size
-        self.curve = self.plot(np.array(self._buffer))
-        self.threshold = threshold
-        self.threshold_line = self.plot([0, self._buffer.maxlen], [self.threshold, self.threshold])
+        self.curve = None
+        self._buffer = None
+        self.threshold_line = None
+        self.threshold = 0
 
         self.setMouseEnabled(False, False)
         self.setMenuEnabled(False)
         self.hideButtons()
-        ylim = (-0.1 * Settings.MAX_POWER_THRESHOLD, Settings.MAX_POWER_THRESHOLD)
+
+        self.apply_config(config)
+
+    def set_info(self, rate=None, chunk=None):
+        if rate is not None:
+            self._config["rate"] = rate
+        if chunk is not None:
+            self._config["chunk"] = chunk
+        self.apply_config(self._config)
+
+    def apply_config(self, config: PlotConfig):
+        self._config = config
+
+        if config["amplitude.show_max_only"]:
+            target_maxlen = int(config["window"] * config["rate"] / config["chunk"])
+        else:
+            target_maxlen = int(config["window"] * config["rate"] / config["amplitude.downsample"])
+
+        if self._buffer is None or self._buffer.maxlen != target_maxlen:
+            self._buffer = collections.deque(maxlen=target_maxlen)
+            self._buffer.extend(np.zeros(self._buffer.maxlen))
+
+        if self.curve is None:
+            self.curve = self.plot(np.array(self._buffer))
+        else:
+            self.curve.setData(np.array(self._buffer))
+
+        if self.threshold_line is None:
+            self.threshold_line = self.plot([0, self._buffer.maxlen], [self.threshold, self.threshold])
+        else:
+            self.set_threshold(self.threshold)
+
+        if config["amplitude.show_max_only"]:
+            ylim = (config["amplitude.y_min"], config["amplitude.y_max"])
+        else:
+            ylim = (-config["amplitude.y_max"], config["amplitude.y_max"])
+
         self.setYRange(*ylim, padding=0)
+        self.setXRange(0, self._buffer.maxlen)
 
     def set_threshold(self, threshold):
-        self.threshold = threshold
-        self.threshold_line.setData([0, self._buffer.maxlen], [threshold, threshold])
+        if self.threshold_line:
+            self.threshold = threshold
+            self.threshold_line.setData([0, self._buffer.maxlen], [threshold, threshold])
 
     def receive_data(self, chunk):
         # self._buffer.append(np.max(np.power(np.abs(chunk), 2)))
         # self._buffer.extend(np.power(np.abs(chunk), 2))
         # self._buffer.extend(chunk[::self.downsample])
-        self._buffer.append(np.max(np.abs(chunk)))
+        if self._buffer is not None:
+            if self._config["amplitude.show_max_only"]:
+                self._buffer.append(np.max(np.abs(chunk)))
+            else:
+                self._buffer.extend(chunk[::self._config["amplitude.downsample"]])
 
     def draw(self):
-        self.curve.setData(np.array(self._buffer).astype(np.float))
+        if self.curve is not None:
+            self.curve.setData(np.array(self._buffer).astype(np.float))

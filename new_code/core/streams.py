@@ -17,6 +17,7 @@ from typing import List
 import numpy as np
 import scipy.io.wavfile
 
+from core.config import RecordingConfig
 from core.events import Signal
 from core.listen import (
     SoundDetector,
@@ -90,7 +91,7 @@ class Pathfinder(object):
 
         self.subdirectories = config.get("subdirectories", [])
         for subdirectory in self.subdirectories:
-            if "{" in subdirectory and subdirectory not in self.CODES:
+            if ("{" in subdirectory or "}" in subdirectory) and subdirectory not in self.CODES:
                 raise ValueError("Save subdirectory code must be in {}".format(self.CODES))
 
         self.filename_format = config.get("filename_format", "{name}_{timestamp}")
@@ -138,7 +139,10 @@ class Pathfinder(object):
         for subdirectory_str in self.subdirectories:
             path = os.path.join(path, subdirectory_str.format(**format_codes))
 
-        filename = self.filename_format.format(**format_codes)
+        try:
+            filename = self.filename_format.format(**format_codes)
+        except:
+            filename = self.filename_format
 
         return os.path.join(path, filename)
 
@@ -260,6 +264,17 @@ class SingleStreamController(object):
 
         self._is_configured = True
 
+    def to_config(self):
+        config = {
+            "channel": self.channel,
+            "name": self.name,
+            "gain": self.gain,
+            "collect": self.collector.to_config(),
+            "detect": self.detector.to_config(),
+        }
+        config["detect"]["threshold"] = self.detector.read_channel_threshold(0)
+        return config
+
     def on_mic_setup(self, setup_dict: dict):
         self.collector.set_sampling_rate(setup_dict["rate"])
         self.detector.set_sampling_rate(setup_dict["rate"])
@@ -300,6 +315,16 @@ class MultiStreamController(object):
         """Return a list of dictionaries with stream info"""
         raise NotImplementedError
 
+    def set_stream_recording_mode(self, stream_index: int, mode: str):
+        """Set the stream recording mode between modes.TRIGGERED and modes.CONTINUOUS
+        """
+        raise NotImplementedError
+
+    def set_stream_threshold(self, stream_index: int, threshold: float):
+        """Set the threshold of a stream by index
+        """
+        raise NotImplementedError
+
     def set_stream_gain(self, stream_index: int, gain: float):
         """Set the gain of a stream by index
         """
@@ -325,6 +350,11 @@ class MultiStreamController(object):
         """
         raise NotImplementedError
 
+    def to_config(self):
+        """Convert current state to a config dict
+        """
+        raise NotImplementedError
+
 
 class IndependentStreamController(MultiStreamController):
     """Manage multiple streams that record and save independently
@@ -345,16 +375,29 @@ class IndependentStreamController(MultiStreamController):
         Return a list of dictionaries with stream info
     stop()
         Clear out signal observers
-    set_stream_gain(self, stream_index: int, gain: float)
-        Set the gain of a stream by index
+    set_stream_channel(stream_index: int, channel: int)
+        Set stream to listen on given channel of device (0 indexed)
+    set_monitor(monitor: bool), set_stream_monitor(stream_index: int, monitor: bool)
+        Set monitor state
+    set_recording_mode(self, mode: str), set_stream_recording_mode(self, stream_index: int, mode: str)
+        Set recording mode between modes.TRIGGERED and modes.CONTINUOUS
+    set_threshold(self, threshold: float), set_stream_threshold(self, stream_index: int, threshold: float)
+        Set threshold for all channels or a specific channel
+    set_gain(self, gain: float), set_stream_gain(self, stream_index: int, gain: float)
+        Set the gain for all channelse of for a stream by index
     set_stream_name(self, stream_index: int, name: str)
         Set the name of a stream by index
     add_stream(self, **config)
         Add a stream at the last index
     remove_stream(self, stream_index: int)
         Remove a stream by index
-    apply_config(self, config: dict):
+    apply_config(self, config: dict)
         Apply a config dictionary
+    apply_collector_config(self, collector_config)
+        This is weird one. The gui wanted to be able to set collector config variables
+        and it seemed eaiser to add this method here -> maybe this should go to the headless App level
+    to_config()
+        Create config from current state - more or less the inverse of apply_config()
 
     Attributes
     ==========
@@ -367,6 +410,15 @@ class IndependentStreamController(MultiStreamController):
         self.OUTPUT = Signal()  # Emits stream idx and data
         self.DETECTED = Signal()
 
+    def _renumber(self):
+        """Updates ids of the stream controllers so they know where they are"""
+        for i, stream in enumerate(self.stream_controllers):
+            stream.id_ = i
+
+    @property
+    def stream_channels(self):
+        return [stream.channel for stream in self.stream_controllers]
+
     def get_streams(self) -> List[dict]:
         """Return a list of dictionaries with stream info"""
         return [
@@ -378,7 +430,6 @@ class IndependentStreamController(MultiStreamController):
                 "name": stream.name,
                 "triggered": stream.collector.mode == TRIGGERED,
                 "monitor": stream.monitor,
-                "save": None, # IDK
             }
             for stream in self.stream_controllers
         ]
@@ -391,14 +442,13 @@ class IndependentStreamController(MultiStreamController):
             stream.DETECTED.disconnect(self.DETECTED.emit)
             stream.stop()
 
-    def apply_collector_config(self, collect_config: dict):
-        for stream_controller in self.stream_controllers:
-            stream_controller.collector.apply_config(collect_config)
-            stream_controller.collector.toggle(TRIGGERED if collect_config.get("triggered") else CONTINUOUS)
+    def set_stream_channel(self, stream_index: int, channel: int):
+        if self.stream_channels[stream_index] == channel:
+            return
 
-    @property
-    def stream_channels(self):
-        return [stream.channel for stream in self.stream_controllers]
+        self.stream_controllers[stream_index].channel = channel
+        self.mic.set_channels(self.stream_channels)
+        self.mic.reset_stream()
 
     def set_monitor(self, monitor: bool):
         for stream_controller in self.stream_controllers:
@@ -428,10 +478,15 @@ class IndependentStreamController(MultiStreamController):
         """
         self.stream_controllers[stream_index].detector.set_channel_threshold(0, threshold)
 
+    def set_gain(self, gain: float):
+        for stream_controller in self.stream_controllers:
+            stream_controller.gain = gain
+
     def set_stream_gain(self, stream_index: int, gain: float):
         """Set the gain of a stream by index
         """
         self.stream_controllers[stream_index].gain = gain
+
 
     def set_stream_name(self, stream_index: int, name: str):
         """Set the name of a stream by index
@@ -460,13 +515,6 @@ class IndependentStreamController(MultiStreamController):
         del self.stream_controllers[stream_index]
         self._renumber()
 
-    def get_buffer_duration(self):
-        return self.stream_controllers[0].collector.buffer_duration
-
-    def _renumber(self):
-        for i, stream in enumerate(self.stream_controllers):
-            stream.id_ = i
-
     def apply_config(self, config: dict):
         """Apply a config dictionary
         """
@@ -485,32 +533,28 @@ class IndependentStreamController(MultiStreamController):
         self.mic.set_channels(self.stream_channels)
         self.mic.reset_stream()
 
+    def apply_collector_config(self, collect_config: dict):
+        for stream_controller in self.stream_controllers:
+            stream_controller.collector.apply_config(collect_config)
+            stream_controller.collector.toggle(TRIGGERED if collect_config.get("triggered") else CONTINUOUS)
+
     def to_config(self):
-        collect_config = {}
-        save_config = self.stream_controllers[0].saver.to_config()
-        detect_config = {}
-
+        """Create config from current state - more or less the inverse of apply_config()
+        """
         streams_config = []
-
         for i, stream_controller in enumerate(self.stream_controllers):
-            stream_config = {}
-            stream_config["channel"] = stream_controller.channel
-            stream_config["name"] = stream_controller.name
-            stream_config["gain"] = stream_controller.gain
-
-            stream_config["collect"] = stream_controller.collector.to_config()
-            # stream_config["save"] = stream_controller.saver.to_config()
-            stream_config["detect"] = stream_controller.detector.to_config()
-            stream_config["detect"]["threshold"] = stream_controller.detector.read_channel_threshold(0)
-
-            streams_config.append(stream_config)
+            streams_config.append(stream_controller.to_config())
 
         return {
-            "save": save_config,
-            "detect": detect_config,
-            "collect": collect_config,
+            "save": self.stream_controllers[0].saver.to_config() if len(self.stream_controllers) else {},
+            "detect": {},
+            "collect": {},
             "streams": streams_config,
         }
+
+    def get_buffer_duration(self):
+        return self.stream_controllers[0].collector.buffer_duration
+
 
 
 class SynchronizedStreamController(MultiStreamController):
@@ -531,19 +575,36 @@ class SynchronizedStreamController(MultiStreamController):
         Return a list of dictionaries with stream info
     stop()
         Clear out signal observers
-    set_stream_gain(self, stream_index: int, gain: float)
-        Set the gain of a stream by index
+    set_monitor(monitor: bool), set_stream_monitor(stream_index: int, monitor: bool)
+        Set monitor state
+    set_recording_mode(self, mode: str), set_stream_recording_mode(self, stream_index: int, mode: str)
+        Set recording mode between modes.TRIGGERED and modes.CONTINUOUS
+    set_threshold(self, threshold: float), set_stream_threshold(self, stream_index: int, threshold: float)
+        Set threshold for all channels or a specific channel
+    set_gain(self, gain: float), set_stream_gain(self, stream_index: int, gain: float)
+        Set the gain for all channelse of for a stream by index
     set_stream_name(self, stream_index: int, name: str)
         Set the name of a stream by index
     add_stream(self, **config)
         Add a stream at the last index
     remove_stream(self, stream_index: int)
         Remove a stream by index
-    apply_config(self, config: dict):
+    apply_config(self, config: dict)
         Apply a config dictionary
+    apply_collector_config(self, collector_config)
+        This is weird one. The gui wanted to be able to set collector config variables
+        and it seemed eaiser to add this method here -> maybe this should go to the headless App level
+    to_config()
+        Create config from current state - more or less the inverse of apply_config()
+
+    get_buffer_duration()
+        This one doesn't feel like it belongs... gets the buffer duration from the sound collector.
+        Is used as a convenience method by the app to update trigger display in the GUI
 
     Attributes
     ==========
+    name: str
+        String representation of all stream names concatenated
     stream_channels: List[int]
         List of integers for the actual device channels corresponding to each stream
     name_per_stream: List[str]
@@ -551,10 +612,12 @@ class SynchronizedStreamController(MultiStreamController):
     gain_per_stream: array
         Gain of each stream. Is a numpy array type so it can be multipled as
         an array to incoming data in the _filter method.
+    monitor: bool
+        Current monitor state. Switched to False when recording.
     mic: core.listen.Microphone
-    saver
-    collector
-    detector
+    saver: core.streams.Pathfinder
+    collector: core.listen.ToggledCollector
+    detector: core.listen.SoundDetector
     """
     def __init__(self, mic):
         super().__init__(mic)
@@ -571,6 +634,24 @@ class SynchronizedStreamController(MultiStreamController):
         self.OUTPUT = Signal()  # Emits stream idx and data
         self.DETECTED = Signal()
 
+    def _filter(self, data):
+        """Pick out the relevant channels from the incoming data and apply gain
+        """
+        # The db_scale function enforces dtype consistency but it can't hurt to
+        # double check...
+        original_dtype = data.dtype
+        out_data = db_scale(data[:, self.stream_channels], self.gain_per_stream)
+        self._FILTERED.emit(out_data.astype(original_dtype))
+
+    @property
+    def name(self):
+        """Concatenated names of all streams
+        """
+        name_parts = []
+        for i, name in enumerate(self.name_per_stream):
+            name_parts.append("{}_{}".format(i, name))
+            return "__".join(name_parts)
+
     def get_streams(self) -> List[dict]:
         """Return a list of dictionaries with stream info"""
         return [
@@ -582,28 +663,9 @@ class SynchronizedStreamController(MultiStreamController):
                 "name": self.name_per_stream[i],
                 "triggered": self.collector.mode == TRIGGERED,
                 "monitor": self.monitor,
-                "save": None, # IDK
             }
             for i, channel in enumerate(self.stream_channels)
         ]
-
-    @property
-    def name(self):
-        """Concatenated names of all streams
-        """
-        name_parts = []
-        for i, name in enumerate(self.name_per_stream):
-            name_parts.append("{}_{}".format(i, name))
-        return "__".join(name_parts)
-
-    def _filter(self, data):
-        """Pick out the relevant channels from the incoming data and apply gain
-        """
-        # The db_scale function enforces dtype consistency but it can't hurt to
-        # double check...
-        original_dtype = data.dtype
-        out_data = db_scale(data[:, self.stream_channels], self.gain_per_stream)
-        self._FILTERED.emit(out_data.astype(original_dtype))
 
     def stop(self):
         """Clear out signal observers"""
@@ -611,10 +673,21 @@ class SynchronizedStreamController(MultiStreamController):
         self.mic.SETUP.disconnect(self.on_mic_setup)
 
     def set_monitor(self, monitor: bool):
+        """Set monitor state"""
         self.monitor = monitor
 
     def set_stream_monitor(self, stream_index: int, mode: str):
         raise NotImplementedError("Synchronized recordings can't set individual streams to monitor")
+
+    def set_stream_channel(self, stream_index: int, channel: int):
+        if self.stream_channels[stream_index] == channel:
+            return
+
+        # Why doesn't it restart??
+        # self.mic.stop()
+        self.stream_channels[stream_index] = channel
+        self.mic.set_channels(self.stream_channels)
+        self.mic.reset_stream()
 
     def set_recording_mode(self, mode: str):
         """Set recording mode between modes.CONTINUOUS and modes.TRIGGERED
@@ -623,10 +696,6 @@ class SynchronizedStreamController(MultiStreamController):
             pass
         else:
             self.collector.toggle(mode)
-
-    def apply_collector_config(self, collect_config: dict):
-        self.collector.apply_config(collect_config)
-        self.collector.toggle(TRIGGERED if collect_config.get("triggered") else CONTINUOUS)
 
     def set_stream_recording_mode(self, stream_index: int, mode: str):
         raise NotImplementedError("Synchronized recordings can't set individual stream triggers")
@@ -667,8 +736,6 @@ class SynchronizedStreamController(MultiStreamController):
             self.gain_per_stream, [config.get("gain", 0)]
         ])
 
-        # self.collector.clear()  # These might not be necessary, as the mic.SETUP event may trigger these
-        # self.detector.clear()
         self.mic.set_channels(self.stream_channels)
         self.mic.reset_stream()
 
@@ -688,11 +755,13 @@ class SynchronizedStreamController(MultiStreamController):
         self.mic.set_channels(self.stream_channels)
         self.mic.reset_stream()
 
-    def apply_config(self, config: dict):
+    def apply_config(self, config: RecordingConfig):
         """Apply a config dictionary
 
         Initializes the collector and detector objects and hooks up events
         """
+        config = config.inherited()
+
         self.mic.stop()
 
         streams = config.get("streams", [])
@@ -705,19 +774,19 @@ class SynchronizedStreamController(MultiStreamController):
                 raise ValueError("Stream at index {} must specific a channel index".format(i))
             self.stream_channels.append(stream["channel"])
             self.name_per_stream.append(stream.get("name", "Ch{}".format(stream["channel"])))
-            self.gain_per_stream[i] = stream.get("gain", 0)
+            self.gain_per_stream[i] = stream["gain"]
 
-        self.collector = ToggledSoundCollector(config.get("collect", {}).get("triggered"))
-        self.collector.apply_config(config.get("collect", {}))
+        self.collector = ToggledSoundCollector(config["collect.triggered"])
+        self.collector.apply_config(config["collect"])
 
         self.saver = Pathfinder()
-        self.saver.apply_config(config.get("save", {}))
+        self.saver.apply_config(config["save"])
 
         self.detector = SoundDetector()
-        self.detector.apply_config(config.get("detect", {}))
-        for i, stream in enumerate(streams):
-            if stream.get("detect", {}).get("threshold"):
-                self.detector.set_channel_threshold(i, stream["detect"]["threshold"])
+        self.detector.apply_config(config["detect"])
+
+        for i, threshold in enumerate(config.read_all("streams[].detect.threshold")):
+            self.detector.set_channel_threshold(i, threshold)
 
         # Link up signals
         self.mic.SETUP.connect(self.on_mic_setup)
@@ -730,6 +799,34 @@ class SynchronizedStreamController(MultiStreamController):
 
         self.mic.set_channels(self.stream_channels)
         self.mic.reset_stream()
+
+    def apply_collector_config(self, collect_config: dict):
+        """Allows public access to setting the collector variables only"""
+        self.collector.apply_config(collect_config)
+        self.collector.toggle(TRIGGERED if collect_config.get("triggered") else CONTINUOUS)
+
+    def to_config(self):
+        """Create config from current state - more or less the inverse of apply_config()
+        """
+        streams_config = []
+        for i in range(len(self.stream_channels)):
+            stream_config = {
+                "channel": self.stream_channels[i],
+                "name": self.name_per_stream[i],
+                "gain": self.gain_per_stream[i],
+                "collect": {},
+                "detect": {
+                    "threshold": self.detector.read_channel_threshold(i)
+                }
+            }
+            streams_config.append(stream_config)
+
+        return {
+            "save": self.saver.to_config(),
+            "detect": self.detector.to_config(),
+            "collect": self.collector.to_config(),
+            "streams": streams_config,
+        }
 
     def get_buffer_duration(self):
         return self.collector.buffer_duration
@@ -753,29 +850,3 @@ class SynchronizedStreamController(MultiStreamController):
     def on_filtered(self, data):
         for i in range(data.shape[1]):
             self.OUTPUT.emit(i, data[:, i:i+1])
-
-    def to_config(self):
-        collect_config = self.collector.to_config()
-        save_config = self.saver.to_config()
-        detect_config = self.detector.to_config()
-
-        streams_config = []
-
-        for i in range(len(self.stream_channels)):
-            stream_config = {}
-            stream_config["channel"] = self.stream_channels[i]
-            stream_config["name"] = self.name_per_stream[i]
-            stream_config["gain"] = self.gain_per_stream[i]
-            stream_config["collect"] = {}
-            # stream_config["save"] = {}
-            stream_config["detect"] = {
-                "threshold": self.detector.read_channel_threshold(i)
-            }
-            streams_config.append(stream_config)
-
-        return {
-            "save": save_config,
-            "detect": detect_config,
-            "collect": collect_config,
-            "streams": streams_config,
-        }
