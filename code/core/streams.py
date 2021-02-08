@@ -487,6 +487,12 @@ class IndependentStreamController(MultiStreamController):
         """
         self.stream_controllers[stream_index].gain = gain
 
+    def get_save_config(self):
+        return self.stream_controllers[0].saver.to_config()
+
+    def set_save_config(self, config: dict):
+        for stream_controller in self.stream_controllers:
+            stream_controller.apply_config(config)
 
     def set_stream_name(self, stream_index: int, name: str):
         """Set the name of a stream by index
@@ -804,6 +810,12 @@ class SynchronizedStreamController(MultiStreamController):
         """Allows public access to setting the collector variables only"""
         self.collector.apply_config(collect_config)
         self.collector.toggle(TRIGGERED if collect_config.get("triggered") else CONTINUOUS)
+
+    def get_save_config(self):
+        return self.saver.to_config()
+
+    def set_save_config(self, config: dict):
+        return self.saver.apply_config(config)
 
     def to_config(self):
         """Create config from current state - more or less the inverse of apply_config()

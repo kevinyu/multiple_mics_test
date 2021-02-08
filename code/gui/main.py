@@ -298,7 +298,7 @@ class MainWindow(widgets.QMainWindow):
 
         self.ui.subdirectoryFormatInput.setText("{name},{date},{hour}")
         self.ui.filenameFormatInput.setText("{name}_{timestamp}")
-        self.ui.baseSaveFolderInput.setText("temp")
+        self.ui.baseSaveFolderInput.setText(".")
 
         self.render_example_path()
 
@@ -339,6 +339,7 @@ class MainWindow(widgets.QMainWindow):
         self.ui.openDeviceButton.clicked.connect(self.on_open_device)
 
         self.ui.applyDetectConfigButton.clicked.connect(self.on_apply_collect_values)
+        self.ui.applySaveConfigButton.clicked.connect(self.on_apply_save_values)
 
         self.ui.saveConfigAction.triggered.connect(self.on_save_config)
         self.ui.loadConfigAction.triggered.connect(self.on_load_config)
@@ -403,11 +404,15 @@ class MainWindow(widgets.QMainWindow):
         channels = self.ui.channelDropdown.currentData()
 
         # Try to preserve stream names when possible when switching devices
-        last_stream_infos = self.app.get_streams()
+        if self.app.stream_controller:
+            last_stream_infos = self.app.get_streams()
+        else:
+            last_stream_infos = None
         # Here we could look up old configs for that device.
         config = self.generate_config(device, channels)
-        for new_stream_config, old_stream_info in zip(config["streams"], last_stream_infos):
-            new_stream_config["name"] = old_stream_info["name"]
+        if last_stream_infos:
+            for new_stream_config, old_stream_info in zip(config["streams"], last_stream_infos):
+                new_stream_config["name"] = old_stream_info["name"]
         self.set_config(config)
         self.set_synchronized_view_state(config.get("synchronized", False))
 
@@ -455,6 +460,10 @@ class MainWindow(widgets.QMainWindow):
                 self.ui.deviceDropdown.setCurrentIndex(i)
                 break
 
+        self.ui.subdirectoryFormatInput.setText(",".join(config["save.subdirectories"]))
+        self.ui.filenameFormatInput.setText(config["save.filename_format"])
+        self.ui.baseSaveFolderInput.setText(config["save.base_dir"])
+
         self.app.apply_config(config)
         self.app.set_monitor(True)
         self.app.run()
@@ -498,9 +507,14 @@ class MainWindow(widgets.QMainWindow):
     def render_example_path(self):
         _saver = Pathfinder()
         _saver.apply_config(self.path_inputs_to_dict())
-        self.ui.exampleSavePathLabel.setText(
-            "Example: {}".format(_saver.get_save_path("STREAM", datetime.datetime.now()))
-        )
+
+        now = datetime.datetime.now()
+        save_path = _saver.get_save_path("name", now)
+        save_path_string = "Ex: {}".format(save_path)
+        if len(save_path_string) > 73:
+            save_path_string = save_path_string[:70] + "..."
+        self.ui.exampleSavePathLabel.setText(save_path_string)
+        self.ui.exampleSavePathLabel.setToolTip(save_path)
 
     def on_save_config(self):
         options = widgets.QFileDialog.Options()
@@ -544,6 +558,10 @@ class MainWindow(widgets.QMainWindow):
             for stream_view in self.stream_views:
                 stream_view.spec_view.apply_config(self.plot_config)
                 stream_view.amp_view.apply_config(self.plot_config)
+
+    def on_apply_save_values(self):
+        config = self.path_inputs_to_dict()
+        self.app.set_save_config(config)
 
 
 def run_app(config_file=None):

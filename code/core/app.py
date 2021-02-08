@@ -36,6 +36,7 @@ class AppController(object):
 
     _public_stream_controller_methods = (
         "get_streams",
+        "set_save_config",
         "set_stream_name",
         "set_stream_channel",
         "set_monitor",
@@ -96,6 +97,7 @@ class AppController(object):
         config = {}
         config["device_name"] = self.mic.device_name
         config["synchronized"] = isinstance(self.stream_controller, SynchronizedStreamController)
+        config["save"] = self.stream_controller.get_save_config()
         config["gain"] = self._config.get("gain", 0)
         stream_controller_config = self.stream_controller.to_config()
         config.update(stream_controller_config)
