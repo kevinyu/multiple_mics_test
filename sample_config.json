@@ -1,0 +1,34 @@
+{
+    "device_name": "default",
+    "gain": 0.0,
+    "collect": {
+        "buffer_duration": 0.2,
+        "max_file_duration": 10.0,
+        "min_file_duration": 0.4,
+        "triggered": true
+    },
+    "detect": {
+        "crossings_threshold": 20,
+        "detection_window": 0.1,
+        "threshold": 1000
+    },
+    "save": {
+        "base_dir": ".",
+        "filename_format": "{name}_{timestamp}",
+        "subdirectories": [
+            "{name}",
+            "{date}",
+            "{hour}"
+        ]
+    },
+    "streams": [
+        {
+            "channel": 0,
+            "collect": {},
+            "detect": {},
+            "gain": 10.0,
+            "name": "Subject1"
+        }
+    ],
+    "synchronized": true
+}
