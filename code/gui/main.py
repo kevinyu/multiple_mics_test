@@ -278,7 +278,6 @@ class MainWindow(widgets.QMainWindow):
         self.app.DETECTED.connect(self.on_detect)
         self.app.MIC_SETUP.connect(self.on_setup_streams)
 
-
         self.plot_config = PlotConfig()
         # self.app.DETECTED.connect(self.update_detections)
         #

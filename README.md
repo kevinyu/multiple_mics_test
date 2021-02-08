@@ -36,5 +36,5 @@ pip install -r requirements.txt
 ### Run program
 
 ```shell
-(env)$ python code/main.py
+(env)$ python code/cli.py gui
 ```
