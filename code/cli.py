@@ -19,11 +19,12 @@ def gui(config):
 
 @click.command()
 @click.option("-c", "--config", type=click.Path(exists=True))
-def listen(config):
+@click.option("--save-on/--save-off", default=False)
+def listen(config, save_on):
     """Entrypoint into test application
     """
-    from app import example_app
-    example_app(config)
+    from app import headless_app
+    headless_app(config, save_on)
 
 
 @click.command()

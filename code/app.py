@@ -133,9 +133,19 @@ async def main_savefn(device_index, channels=1):
         mic.stop()
 
 
-def example_app(config_file):
+def headless_app(config_file, save_on=False):
     app = AppController()
     with open(config_file, "r") as yaml_config:
         config = yaml.load(yaml_config)
+
+    print("Running app with config:\n{}".format(config))
     app.apply_config(config)
-    asyncio.run(app.run())
+    app.set_monitor(not save_on)
+    app.run()
+
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_forever()
+    except KeyboardInterrupt:
+        print("Closing program")
+        app.stop()

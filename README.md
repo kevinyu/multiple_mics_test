@@ -35,6 +35,14 @@ pip install -r requirements.txt
 
 ### Run program
 
+GUI mode
+
 ```shell
 (env)$ python code/cli.py gui
+```
+
+Headless mode
+
+```shell
+(env)$ python code/cli.py listen -c sample_config.json --save-on/--save-off
 ```
