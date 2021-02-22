@@ -308,6 +308,11 @@ class BaseSoundCollector(object):
         }
 
         self._save_buffer = RingBuffer()
+
+        # These flags are set so that the next call to receive_data() can deal
+        # with the initial switch from recording on to recording off
+        self._buffer_needs_clearing = False  # Set when recording is turned from off to on
+        self._buffer_needs_saving = False    # Set when recording is turned from on to off
         self._trigger_timer = None
 
         self.min_file_duration = min_file_duration
@@ -359,16 +364,27 @@ class BaseSoundCollector(object):
     def start_recording(self):
         if self.status["recording"] is False:
             self.RECORDING.emit(True)
+            self._buffer_needs_clearing = True
         self.status["recording"] = True
 
     def stop_recording(self):
         if self.status["recording"] is True:
+            self._buffer_needs_saving = True
             self.RECORDING.emit(False)
         self.status["recording"] = False
 
     def receive_data(self, chunk):
         if not self.status["ready"]:
             return
+
+        # When recording is starting, we clear out the buffer except for a small chunk (buffer_duration)
+        # so the beginning of the files are padded
+        if self._buffer_needs_clearing:
+            buffer_size = int(self.sampling_rate * self.buffer_duration)
+            data_to_hold = self._save_buffer.read_last(buffer_size)
+            self._save_buffer.clear()
+            self._save_buffer.extend(data_to_hold)
+            self._buffer_needs_clearing = False
 
         self._save_buffer.extend(chunk)
 
@@ -379,10 +395,12 @@ class BaseSoundCollector(object):
                 self._save_buffer.extend(data[self.max_file_length:])
                 self.SAVE_READY.emit(data[:self.max_file_length], self.sampling_rate)
         else:
-            if self.min_file_length and len(self._save_buffer) > self.min_file_length:
+            # If recording is just switched from on to off, see if the buffer is long enough to save
+            if self._buffer_needs_saving and self.min_file_length and len(self._save_buffer) > self.min_file_length:
                 data = np.array(self._save_buffer)
                 self.SAVE_READY.emit(data, self.sampling_rate)
-            self._save_buffer.clear()
+                self._buffer_needs_clearing = True
+            self._buffer_needs_saving = False
 
 
 class TriggeredSoundCollector(BaseSoundCollector):
