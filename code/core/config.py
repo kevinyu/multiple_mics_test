@@ -206,10 +206,12 @@ class NestedConfig(dict):
         """
         copied = self.inherited()
         for base_key, nested_key in self.inherited_values:
+
             values = set(read_all_values(copied, self._str2list(nested_key), include_missing=include_missing))
             if len(values) == 1:
-                fill_in_at(copied, self._str2list(base_key), list(values)[0])
+                fill_in_at(copied, self._str2list(base_key), list(values)[0], force=True)
                 fill_in_at(copied, self._str2list(nested_key), delete=True)
+
         return copied
 
     def read_all(self, key):

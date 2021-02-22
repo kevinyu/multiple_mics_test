@@ -87,7 +87,7 @@ class Pathfinder(object):
         """
         self.base_dir = config.get("base_dir")
         if not self.base_dir or not os.path.exists(self.base_dir):
-            raise ValueError("Base directory {} does not exist".format(self.base_dir))
+            print("Warning: Base save directory {} does not exist".format(self.base_dir))
 
         self.subdirectories = config.get("subdirectories", [])
         for subdirectory in self.subdirectories:
